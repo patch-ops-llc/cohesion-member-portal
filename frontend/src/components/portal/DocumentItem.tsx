@@ -26,7 +26,9 @@ export function DocumentItem({
   document,
   onUpdateName,
   onRemove,
-  clientMode = false
+  onUpdateStatus,
+  clientMode = false,
+  isSaving = false
 }: DocumentItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(document.name);

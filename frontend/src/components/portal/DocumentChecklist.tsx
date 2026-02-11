@@ -23,7 +23,8 @@ export function DocumentChecklist({
   onUpdateDocumentName,
   onUpdateDocumentStatus,
   onRemoveDocument,
-  clientMode = false
+  clientMode = false,
+  isSaving = false
 }: DocumentChecklistProps) {
   const selectedSections = documentData._meta?.selectedSections || ['personal'];
   const showPersonal = selectedSections.includes('personal');
