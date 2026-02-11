@@ -1,7 +1,9 @@
 import { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogOut, FileText } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+
+const COHESION_LOGO_URL = 'https://cohesionco.com/wp-content/uploads/2025/10/Cohesion-logo-with-trademark-1.png';
 
 interface LayoutProps {
   children: ReactNode;
@@ -23,9 +25,12 @@ export function Layout({ children }: LayoutProps) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
-            <Link to="/" className="flex items-center space-x-3">
-              <FileText className="h-8 w-8" />
-              <span className="text-xl font-bold">Cohesion Portal</span>
+            <Link to="/" className="flex items-center">
+              <img 
+                src={COHESION_LOGO_URL} 
+                alt="Cohesion" 
+                className="h-10 w-auto"
+              />
             </Link>
 
             {/* User menu */}
