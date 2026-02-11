@@ -1,13 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getProjects, getProject, updateDocumentData, uploadFile } from '../services/projects';
+import { lookupProjects, getProject, updateDocumentData, uploadFile } from '../services/projects';
+import { getStoredEmail } from '../services/api';
 import type { DocumentData, ModifiedFields } from '../types';
 
-// Hook to get all projects
+// Hook to get all projects for current email
 export function useProjects() {
+  const email = getStoredEmail();
+  
   return useQuery({
-    queryKey: ['projects'],
-    queryFn: getProjects,
-    staleTime: 30000, // 30 seconds
+    queryKey: ['projects', email],
+    queryFn: () => lookupProjects(email || ''),
+    enabled: !!email,
+    staleTime: 30000,
     retry: 2
   });
 }
@@ -18,7 +22,7 @@ export function useProject(projectId: string | undefined) {
     queryKey: ['project', projectId],
     queryFn: () => getProject(projectId!),
     enabled: !!projectId,
-    staleTime: 10000, // 10 seconds
+    staleTime: 10000,
     retry: 2
   });
 }
@@ -33,11 +37,13 @@ export function useUpdateDocumentData(projectId: string) {
       modifiedFields: ModifiedFields 
     }) => updateDocumentData(projectId, documentData, modifiedFields),
     onSuccess: (mergedData) => {
-      // Update the cache with merged data
-      queryClient.setQueryData(['project', projectId], (old: ReturnType<typeof getProject> extends Promise<infer T> ? T : never) => ({
-        ...old,
-        documentData: mergedData
-      }));
+      queryClient.setQueryData(['project', projectId], (old: Awaited<ReturnType<typeof getProject>> | undefined) => {
+        if (!old) return old;
+        return {
+          ...old,
+          documentData: mergedData
+        };
+      });
     },
     onError: (error) => {
       console.error('Failed to update document data:', error);
@@ -56,7 +62,6 @@ export function useUploadFile(projectId: string) {
       documentIndex?: number 
     }) => uploadFile(projectId, file, categoryKey, documentIndex),
     onSuccess: () => {
-      // Invalidate project query to refresh data
       queryClient.invalidateQueries({ queryKey: ['project', projectId] });
     },
     onError: (error) => {

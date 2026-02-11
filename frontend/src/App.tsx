@@ -2,8 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Auth components
-import { MagicLinkForm } from './components/auth/MagicLinkForm';
-import { VerifyLink } from './components/auth/VerifyLink';
+import { EmailLookupForm } from './components/auth/EmailLookupForm';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
 // Shared components
@@ -23,7 +22,7 @@ import { ProjectEditor } from './components/admin/ProjectEditor';
 import { AuditLog } from './components/admin/AuditLog';
 
 // Auth provider
-import { AuthProvider, AuthContext } from './hooks/useAuth';
+import { AuthProvider } from './hooks/useAuth';
 
 // Create query client
 const queryClient = new QueryClient({
@@ -51,11 +50,10 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ErrorBoundary>
-          <AuthProviderWrapper>
+          <AuthProvider>
             <Routes>
               {/* Public routes */}
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/auth/verify/:token" element={<VerifyLink />} />
 
               {/* Protected client routes */}
               <Route
@@ -117,19 +115,10 @@ function App() {
               {/* Fallback */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-          </AuthProviderWrapper>
+          </AuthProvider>
         </ErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>
-  );
-}
-
-// Wrapper to provide auth context
-function AuthProviderWrapper({ children }: { children: React.ReactNode }) {
-  return (
-    <AuthProvider>
-      {children}
-    </AuthProvider>
   );
 }
 
@@ -138,7 +127,7 @@ function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
-        <MagicLinkForm />
+        <EmailLookupForm />
       </div>
     </div>
   );

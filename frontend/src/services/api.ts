@@ -9,19 +9,12 @@ const api: AxiosInstance = axios.create({
   }
 });
 
-// Request interceptor - add auth token
+// Request interceptor - add admin API key for admin routes
 api.interceptors.request.use(
   (config) => {
-    // Check for admin API key first (for admin routes)
     const adminApiKey = localStorage.getItem('admin_api_key');
     if (adminApiKey && config.url?.startsWith('/admin')) {
       config.headers['X-API-Key'] = adminApiKey;
-    }
-    
-    // Add JWT token for client routes
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
@@ -32,13 +25,6 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError<{ error?: string }>) => {
-    if (error.response?.status === 401) {
-      // Clear auth and redirect to login
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
-    }
-    
     const message = error.response?.data?.error || error.message || 'An error occurred';
     return Promise.reject(new Error(message));
   }
@@ -46,31 +32,15 @@ api.interceptors.response.use(
 
 export default api;
 
-// Helper to set auth token
-export function setAuthToken(token: string): void {
-  localStorage.setItem('auth_token', token);
+// Helper to get/set stored email
+export function getStoredEmail(): string | null {
+  return localStorage.getItem('user_email');
 }
 
-// Helper to clear auth token
-export function clearAuthToken(): void {
-  localStorage.removeItem('auth_token');
-  localStorage.removeItem('user');
+export function setStoredEmail(email: string): void {
+  localStorage.setItem('user_email', email.toLowerCase().trim());
 }
 
-// Helper to get stored user
-export function getStoredUser(): { id: string; email: string } | null {
-  const userStr = localStorage.getItem('user');
-  if (userStr) {
-    try {
-      return JSON.parse(userStr);
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-// Helper to store user
-export function storeUser(user: { id: string; email: string }): void {
-  localStorage.setItem('user', JSON.stringify(user));
+export function clearStoredEmail(): void {
+  localStorage.removeItem('user_email');
 }

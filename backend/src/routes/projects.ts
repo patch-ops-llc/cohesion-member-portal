@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import * as hubspot from '../services/hubspot';
-import { authMiddleware } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { mergeDocumentData, getNormalizedStage } from '../utils/documentData';
@@ -10,14 +9,17 @@ import prisma from '../db/client';
 
 const router = Router();
 
-// GET /api/projects - Get all projects for authenticated user
-router.get('/', authMiddleware, async (req, res, next) => {
+// POST /api/projects/lookup - Get all projects for an email
+router.post('/lookup', async (req, res, next) => {
   try {
-    if (!req.user) {
-      throw new AppError('Not authenticated', 401);
-    }
+    const schema = z.object({
+      email: z.string().email()
+    });
 
-    const projects = await hubspot.getProjectsByEmail(req.user.email);
+    const { email } = schema.parse(req.body);
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const projects = await hubspot.getProjectsByEmail(normalizedEmail);
 
     // Transform projects for frontend
     const transformedProjects = projects.map(project => {
@@ -33,32 +35,37 @@ router.get('/', authMiddleware, async (req, res, next) => {
       };
     });
 
-    logger.info('Projects fetched', { 
-      userId: req.user.userId, 
-      count: transformedProjects.length 
-    });
+    logger.info('Projects lookup', { email: normalizedEmail, count: transformedProjects.length });
 
     res.json({
       success: true,
+      email: normalizedEmail,
       projects: transformedProjects
     });
   } catch (error) {
-    next(error);
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid email address', 400));
+    } else {
+      next(error);
+    }
   }
 });
 
-// GET /api/projects/:id - Get single project
-router.get('/:id', authMiddleware, async (req, res, next) => {
+// GET /api/projects/:id - Get single project (requires email query param for verification)
+router.get('/:id', async (req, res, next) => {
   try {
-    if (!req.user) {
-      throw new AppError('Not authenticated', 401);
+    const { id } = req.params;
+    const email = req.query.email as string;
+
+    if (!email) {
+      throw new AppError('Email is required', 400);
     }
 
-    const { id } = req.params;
+    const normalizedEmail = email.toLowerCase().trim();
     const project = await hubspot.getProject(id);
 
     // Verify user has access to this project
-    if (project.properties.email?.toLowerCase().trim() !== req.user.email.toLowerCase().trim()) {
+    if (project.properties.email?.toLowerCase().trim() !== normalizedEmail) {
       throw new AppError('Access denied', 403);
     }
 
@@ -71,7 +78,7 @@ router.get('/:id', authMiddleware, async (req, res, next) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    logger.info('Project fetched', { projectId: id, userId: req.user.userId });
+    logger.info('Project fetched', { projectId: id, email: normalizedEmail });
 
     res.json({
       success: true,
@@ -91,25 +98,23 @@ router.get('/:id', authMiddleware, async (req, res, next) => {
 });
 
 // PATCH /api/projects/:id/document-data - Update document data with merge
-router.patch('/:id/document-data', authMiddleware, async (req, res, next) => {
+router.patch('/:id/document-data', async (req, res, next) => {
   try {
-    if (!req.user) {
-      throw new AppError('Not authenticated', 401);
-    }
-
     const { id } = req.params;
     
     // Validate request body
     const schema = z.object({
+      email: z.string().email(),
       documentData: z.record(z.unknown()),
       modifiedFields: modifiedFieldsSchema
     });
 
-    const { documentData, modifiedFields } = schema.parse(req.body);
+    const { email, documentData, modifiedFields } = schema.parse(req.body);
+    const normalizedEmail = email.toLowerCase().trim();
 
     // Get current project and verify access
     const project = await hubspot.getProject(id);
-    if (project.properties.email?.toLowerCase().trim() !== req.user.email.toLowerCase().trim()) {
+    if (project.properties.email?.toLowerCase().trim() !== normalizedEmail) {
       throw new AppError('Access denied', 403);
     }
 
@@ -132,7 +137,7 @@ router.patch('/:id/document-data', authMiddleware, async (req, res, next) => {
         action: 'update_document_data',
         entityType: 'project',
         entityId: id,
-        userId: req.user.userId,
+        userEmail: normalizedEmail,
         userType: 'client',
         details: { modifiedFields },
         ipAddress: req.ip,
@@ -140,7 +145,7 @@ router.patch('/:id/document-data', authMiddleware, async (req, res, next) => {
       }
     });
 
-    logger.info('Document data updated', { projectId: id, userId: req.user.userId });
+    logger.info('Document data updated', { projectId: id, email: normalizedEmail });
 
     res.json({
       success: true,

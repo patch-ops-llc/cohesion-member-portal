@@ -1,95 +1,66 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { isAuthenticated, getCurrentUser, logout as logoutApi } from '../services/auth';
-import { getStoredUser } from '../services/api';
-import type { AuthState, User } from '../types';
+import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { getStoredEmail, setStoredEmail, clearStoredEmail } from '../services/api';
+import { lookupProjects } from '../services/projects';
+
+interface AuthState {
+  isAuthenticated: boolean;
+  email: string | null;
+}
 
 interface AuthContextType extends AuthState {
-  login: (token: string, user: User) => void;
-  logout: () => Promise<void>;
-  checkAuth: () => Promise<void>;
+  login: (email: string) => Promise<boolean>;
+  logout: () => void;
 }
 
 const defaultContext: AuthContextType = {
   isAuthenticated: false,
-  isLoading: true,
-  user: null,
-  token: null,
-  login: () => {},
-  logout: async () => {},
-  checkAuth: async () => {}
+  email: null,
+  login: async () => false,
+  logout: () => {}
 };
 
 const AuthContext = createContext<AuthContextType>(defaultContext);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AuthState>({
-    isAuthenticated: false,
-    isLoading: true,
-    user: null,
-    token: null
+  const [state, setState] = useState<AuthState>(() => {
+    const email = getStoredEmail();
+    return {
+      isAuthenticated: !!email,
+      email
+    };
   });
 
-  const checkAuth = useCallback(async () => {
-    setState(prev => ({ ...prev, isLoading: true }));
+  const login = useCallback(async (email: string): Promise<boolean> => {
+    const normalizedEmail = email.toLowerCase().trim();
     
-    try {
-      if (isAuthenticated()) {
-        const storedUser = getStoredUser();
-        if (storedUser) {
-          // Verify token is still valid
-          const response = await getCurrentUser();
-          setState({
-            isAuthenticated: true,
-            isLoading: false,
-            user: { id: response.user.id, email: response.user.email },
-            token: localStorage.getItem('auth_token')
-          });
-          return;
-        }
-      }
-    } catch (error) {
-      console.error('Auth check failed:', error);
+    // Verify email has projects in HubSpot
+    const projects = await lookupProjects(normalizedEmail);
+    
+    if (projects.length === 0) {
+      return false; // No projects found
     }
     
-    setState({
-      isAuthenticated: false,
-      isLoading: false,
-      user: null,
-      token: null
-    });
-  }, []);
-
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
-
-  const login = useCallback((token: string, user: User) => {
+    setStoredEmail(normalizedEmail);
     setState({
       isAuthenticated: true,
-      isLoading: false,
-      user,
-      token
+      email: normalizedEmail
     });
+    
+    return true;
   }, []);
 
-  const logout = useCallback(async () => {
-    try {
-      await logoutApi();
-    } finally {
-      setState({
-        isAuthenticated: false,
-        isLoading: false,
-        user: null,
-        token: null
-      });
-    }
+  const logout = useCallback(() => {
+    clearStoredEmail();
+    setState({
+      isAuthenticated: false,
+      email: null
+    });
   }, []);
 
   const value: AuthContextType = {
     ...state,
     login,
-    logout,
-    checkAuth
+    logout
   };
 
   return (

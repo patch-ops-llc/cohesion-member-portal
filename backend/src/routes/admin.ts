@@ -15,8 +15,7 @@ router.use(adminMiddleware);
 // GET /api/admin/projects - List all projects with search/filter
 router.get('/projects', async (req, res, next) => {
   try {
-    const { search, page = '1', limit = '20' } = req.query;
-    const pageNum = parseInt(page as string);
+    const { search, limit = '20' } = req.query;
     const limitNum = Math.min(parseInt(limit as string), 100);
 
     // Get all projects from HubSpot
@@ -61,15 +60,11 @@ router.get('/projects', async (req, res, next) => {
       };
     });
 
-    logger.info('Admin projects fetched', { 
-      count: transformedProjects.length,
-      adminUser: req.adminUser?.email 
-    });
+    logger.info('Admin projects fetched', { count: transformedProjects.length });
 
     res.json({
       success: true,
       projects: transformedProjects,
-      page: pageNum,
       total: transformedProjects.length,
       hasMore: !!result.paging?.next?.after
     });
@@ -88,12 +83,7 @@ router.get('/projects/:id', async (req, res, next) => {
     // Get file uploads
     const fileUploads = await prisma.fileUpload.findMany({
       where: { projectId: id },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        uploadedBy: {
-          select: { email: true }
-        }
-      }
+      orderBy: { createdAt: 'desc' }
     });
 
     // Get audit log
@@ -103,10 +93,7 @@ router.get('/projects/:id', async (req, res, next) => {
       take: 50
     });
 
-    logger.info('Admin project detail fetched', { 
-      projectId: id,
-      adminUser: req.adminUser?.email 
-    });
+    logger.info('Admin project detail fetched', { projectId: id });
 
     res.json({
       success: true,
@@ -145,7 +132,7 @@ router.patch('/projects/:id/document-data', async (req, res, next) => {
         action: 'admin_update_document_data',
         entityType: 'project',
         entityId: id,
-        userId: req.adminUser?.id,
+        userEmail: 'admin',
         userType: 'admin',
         details: { documentData },
         ipAddress: req.ip,
@@ -153,10 +140,7 @@ router.patch('/projects/:id/document-data', async (req, res, next) => {
       }
     });
 
-    logger.info('Admin updated document data', { 
-      projectId: id,
-      adminUser: req.adminUser?.email 
-    });
+    logger.info('Admin updated document data', { projectId: id });
 
     res.json({
       success: true,
@@ -200,7 +184,7 @@ router.patch('/projects/:id/document/:categoryKey/:docIndex/status', async (req,
         action: 'admin_update_document_status',
         entityType: 'document',
         entityId: `${id}/${categoryKey}/${docIndex}`,
-        userId: req.adminUser?.id,
+        userEmail: 'admin',
         userType: 'admin',
         details: { previousStatus, newStatus: status, categoryKey, docIndex: docIndexNum },
         ipAddress: req.ip,
@@ -208,13 +192,7 @@ router.patch('/projects/:id/document/:categoryKey/:docIndex/status', async (req,
       }
     });
 
-    logger.info('Admin updated document status', { 
-      projectId: id,
-      categoryKey,
-      docIndex: docIndexNum,
-      status,
-      adminUser: req.adminUser?.email 
-    });
+    logger.info('Admin updated document status', { projectId: id, categoryKey, docIndex: docIndexNum, status });
 
     res.json({
       success: true,
@@ -242,12 +220,7 @@ router.get('/audit-log', async (req, res, next) => {
     const entries = await prisma.auditLog.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take: limitNum,
-      include: {
-        user: {
-          select: { email: true }
-        }
-      }
+      take: limitNum
     });
 
     res.json({
@@ -270,7 +243,6 @@ router.get('/stats', async (req, res, next) => {
 
     for (const project of result.projects) {
       const documentData = hubspot.parseDocumentData(project.properties.document_data);
-      let hasPending = false;
       let hasActive = false;
 
       for (const key of Object.keys(documentData)) {
@@ -280,7 +252,6 @@ router.get('/stats', async (req, res, next) => {
         if (category.documents) {
           for (const doc of category.documents) {
             if (doc.status === 'pending_review') {
-              hasPending = true;
               pendingReviewCount++;
             }
           }
@@ -294,7 +265,7 @@ router.get('/stats', async (req, res, next) => {
     const recentUploads = await prisma.fileUpload.count({
       where: {
         createdAt: {
-          gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
+          gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
         }
       }
     });

@@ -1,5 +1,4 @@
-// This is your Prisma schema file
-// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Simplified Prisma schema - no auth tables needed
 
 generator client {
   provider = "prisma-client-js"
@@ -10,64 +9,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Users table (clients who log in via magic link)
-model User {
-  id              String    @id @default(uuid())
-  email           String    @unique
-  hubspotContactId String?  @map("hubspot_contact_id")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  lastLogin       DateTime? @map("last_login")
-
-  sessions    Session[]
-  fileUploads FileUpload[]
-  auditLogs   AuditLog[]
-
-  @@map("users")
-}
-
-// Magic link tokens
-model MagicLink {
-  id        String    @id @default(uuid())
-  email     String
-  token     String    @unique
-  expiresAt DateTime  @map("expires_at")
-  usedAt    DateTime? @map("used_at")
-  createdAt DateTime  @default(now()) @map("created_at")
-
-  @@index([token])
-  @@index([expiresAt])
-  @@map("magic_links")
-}
-
-// Active sessions
-model Session {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  token     String   @unique
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([token])
-  @@index([expiresAt])
-  @@map("sessions")
-}
-
-// Admin users (staff)
-model AdminUser {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  name          String?
-  hubspotUserId String?   @map("hubspot_user_id")
-  role          String    @default("staff")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  lastLogin     DateTime? @map("last_login")
-
-  @@map("admin_users")
-}
-
-// File upload metadata
+// File upload metadata (HubSpot is source of truth, this is for quick lookups)
 model FileUpload {
   id              String   @id @default(uuid())
   projectId       String   @map("project_id")
@@ -80,11 +22,9 @@ model FileUpload {
   hubspotNoteId   String?  @map("hubspot_note_id")
   fileSize        Int?     @map("file_size")
   mimeType        String?  @map("mime_type")
-  uploadedById    String?  @map("uploaded_by")
+  uploadedByEmail String?  @map("uploaded_by_email")
   status          String   @default("pending_review")
   createdAt       DateTime @default(now()) @map("created_at")
-
-  uploadedBy User? @relation(fields: [uploadedById], references: [id])
 
   @@index([projectId])
   @@map("file_uploads")
@@ -96,14 +36,12 @@ model AuditLog {
   action     String
   entityType String?  @map("entity_type")
   entityId   String?  @map("entity_id")
-  userId     String?  @map("user_id")
+  userEmail  String?  @map("user_email")
   userType   String?  @map("user_type") // 'client' or 'admin'
   details    Json?
   ipAddress  String?  @map("ip_address")
   userAgent  String?  @map("user_agent")
   createdAt  DateTime @default(now()) @map("created_at")
-
-  user User? @relation(fields: [userId], references: [id])
 
   @@index([entityType, entityId])
   @@index([createdAt])

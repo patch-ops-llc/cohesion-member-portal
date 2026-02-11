@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogOut, FileText, User } from 'lucide-react';
+import { LogOut, FileText } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
 interface LayoutProps {
@@ -8,11 +8,11 @@ interface LayoutProps {
 }
 
 export function Layout({ children }: LayoutProps) {
-  const { isAuthenticated, user, logout } = useAuth();
+  const { isAuthenticated, email, logout } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogout = async () => {
-    await logout();
+  const handleLogout = () => {
+    logout();
     navigate('/login');
   };
 
@@ -29,18 +29,15 @@ export function Layout({ children }: LayoutProps) {
             </Link>
 
             {/* User menu */}
-            {isAuthenticated && user && (
+            {isAuthenticated && email && (
               <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2 text-sm">
-                  <User className="h-4 w-4" />
-                  <span>{user.email}</span>
-                </div>
+                <span className="text-sm hidden sm:block">{email}</span>
                 <button
                   onClick={handleLogout}
                   className="flex items-center space-x-1 px-3 py-2 rounded-lg hover:bg-primary-800 transition-colors"
                 >
                   <LogOut className="h-4 w-4" />
-                  <span>Logout</span>
+                  <span className="hidden sm:inline">Exit</span>
                 </button>
               </div>
             )}

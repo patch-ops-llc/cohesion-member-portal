@@ -2,9 +2,9 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { z } from 'zod';
 import * as hubspot from '../services/hubspot';
 import * as storage from '../services/storage';
-import { authMiddleware } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { validateFile, allowedMimeTypes, maxFileSize } from '../utils/validation';
 import { logger } from '../utils/logger';
@@ -32,35 +32,36 @@ if (!fs.existsSync(tmpDir)) {
 }
 
 // POST /api/files/:projectId/upload - Upload file for a project
-router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (req, res, next) => {
+router.post('/:projectId/upload', upload.single('file'), async (req, res, next) => {
   try {
-    if (!req.user) {
-      throw new AppError('Not authenticated', 401);
-    }
-
     const { projectId } = req.params;
-    const { categoryKey, documentIndex } = req.body;
+    const { email, categoryKey, documentIndex } = req.body;
     const file = req.file;
 
     if (!file) {
       throw new AppError('No file uploaded', 400);
     }
 
+    if (!email) {
+      throw new AppError('Email is required', 400);
+    }
+
     if (!categoryKey) {
       throw new AppError('Category key is required', 400);
     }
 
+    const normalizedEmail = email.toLowerCase().trim();
+
     // Validate file
     const validation = validateFile(file);
     if (!validation.valid) {
-      // Clean up temp file
       fs.unlinkSync(file.path);
       throw new AppError(validation.error || 'Invalid file', 400);
     }
 
     // Get project and verify access
     const project = await hubspot.getProject(projectId);
-    if (project.properties.email?.toLowerCase().trim() !== req.user.email.toLowerCase().trim()) {
+    if (project.properties.email?.toLowerCase().trim() !== normalizedEmail) {
       fs.unlinkSync(file.path);
       throw new AppError('Access denied', 403);
     }
@@ -94,8 +95,8 @@ router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (
     const docIndex = parseInt(documentIndex);
     
     if (documentData[categoryKey] && 
-        typeof documentData[categoryKey] !== 'object' || 
-        !('selectedSections' in (documentData[categoryKey] as object))) {
+        typeof documentData[categoryKey] === 'object' && 
+        !('selectedSections' in documentData[categoryKey])) {
       const category = documentData[categoryKey] as hubspot.CategoryData;
       if (category.documents && !isNaN(docIndex) && category.documents[docIndex]) {
         category.documents[docIndex].status = 'pending_review';
@@ -116,7 +117,7 @@ router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (
         hubspotNoteId: noteId,
         fileSize: file.size,
         mimeType: file.mimetype,
-        uploadedById: req.user.userId,
+        uploadedByEmail: normalizedEmail,
         status: 'pending_review'
       }
     });
@@ -127,7 +128,7 @@ router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (
         action: 'file_upload',
         entityType: 'file',
         entityId: fileUpload.id,
-        userId: req.user.userId,
+        userEmail: normalizedEmail,
         userType: 'client',
         details: {
           projectId,
@@ -145,7 +146,7 @@ router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (
       projectId,
       fileId: fileUpload.id,
       hubspotFileId,
-      userId: req.user.userId
+      email: normalizedEmail
     });
 
     res.json({
@@ -164,13 +165,14 @@ router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (
 });
 
 // GET /api/files/:id - Get file info
-router.get('/:id', authMiddleware, async (req, res, next) => {
+router.get('/:id', async (req, res, next) => {
   try {
-    if (!req.user) {
-      throw new AppError('Not authenticated', 401);
-    }
-
     const { id } = req.params;
+    const email = req.query.email as string;
+
+    if (!email) {
+      throw new AppError('Email is required', 400);
+    }
 
     const fileUpload = await prisma.fileUpload.findUnique({
       where: { id }
@@ -182,7 +184,7 @@ router.get('/:id', authMiddleware, async (req, res, next) => {
 
     // Verify user has access to this project
     const project = await hubspot.getProject(fileUpload.projectId);
-    if (project.properties.email?.toLowerCase().trim() !== req.user.email.toLowerCase().trim()) {
+    if (project.properties.email?.toLowerCase().trim() !== email.toLowerCase().trim()) {
       throw new AppError('Access denied', 403);
     }
 
@@ -190,39 +192,6 @@ router.get('/:id', authMiddleware, async (req, res, next) => {
       success: true,
       file: fileUpload
     });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// GET /api/files/:id/download - Download file
-router.get('/:id/download', authMiddleware, async (req, res, next) => {
-  try {
-    if (!req.user) {
-      throw new AppError('Not authenticated', 401);
-    }
-
-    const { id } = req.params;
-
-    const fileUpload = await prisma.fileUpload.findUnique({
-      where: { id }
-    });
-
-    if (!fileUpload) {
-      throw new AppError('File not found', 404);
-    }
-
-    // Verify user has access to this project
-    const project = await hubspot.getProject(fileUpload.projectId);
-    if (project.properties.email?.toLowerCase().trim() !== req.user.email.toLowerCase().trim()) {
-      throw new AppError('Access denied', 403);
-    }
-
-    if (!fileUpload.storagePath || !storage.fileExists(fileUpload.storagePath)) {
-      throw new AppError('File not found on disk', 404);
-    }
-
-    res.download(fileUpload.storagePath, fileUpload.originalFilename);
   } catch (error) {
     next(error);
   }
