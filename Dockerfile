@@ -56,4 +56,5 @@ EXPOSE 8080
 
 # Start server immediately; run migrations in background so healthcheck can pass
 # (prisma migrate deploy blocks startup; if DB is slow/unavailable, server never listens)
-CMD ["sh", "-c", "cd backend && npx prisma migrate deploy 2>&1 & exec node dist/index.js"]
+# Use absolute path - backend dist is at /app/backend/dist/
+CMD ["sh", "-c", "cd /app/backend && npx prisma migrate deploy 2>&1 & exec node /app/backend/dist/index.js"]
