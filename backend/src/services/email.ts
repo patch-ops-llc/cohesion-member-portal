@@ -1,7 +1,14 @@
 import { Resend } from 'resend';
 import { logger } from '../utils/logger';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+let resendInstance: Resend | null = null;
+function getResend(): Resend | null {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!resendInstance) {
+    resendInstance = new Resend(process.env.RESEND_API_KEY);
+  }
+  return resendInstance;
+}
 
 const fromEmail = process.env.FROM_EMAIL || 'noreply@example.com';
 const fromName = process.env.FROM_NAME || 'Cohesion Portal';
@@ -19,7 +26,8 @@ export async function sendPasswordResetEmail(email: string, resetToken: string):
   `;
 
   try {
-    if (!process.env.RESEND_API_KEY) {
+    const resend = getResend();
+    if (!resend) {
       logger.warn('Resend API key not configured - password reset link (dev only):', { resetUrl });
       return;
     }
