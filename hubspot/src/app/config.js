@@ -7,4 +7,4 @@
  * - CORS_ORIGINS on the backend includes HubSpot (https://app.hubspot.com, https://app-eu1.hubspot.com)
  */
 export const BACKEND_URL =
-  'https://cohesion-member-portal.railway.internal';
+  'https://cohesion-member-portal-production.up.railway.app';

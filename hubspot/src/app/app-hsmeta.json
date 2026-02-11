@@ -12,7 +12,7 @@
     "permittedUrls": {
       "fetch": [
         "https://api.hubapi.com",
-        "https://cohesion-member-portal.railway.internal"
+        "https://cohesion-member-portal-production.up.railway.app"
       ],
       "iframe": [],
       "img": []
