@@ -1,4 +1,4 @@
-import { Client } from '@hubspot/api-client';
+import { Client, AssociationSpecAssociationCategoryEnum } from '@hubspot/api-client';
 import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
@@ -190,7 +190,7 @@ export async function createNoteWithAttachment(
           to: { id: projectId },
           types: [
             {
-              associationCategory: 'USER_DEFINED',
+              associationCategory: AssociationSpecAssociationCategoryEnum.UserDefined,
               associationTypeId: 6
             }
           ]
