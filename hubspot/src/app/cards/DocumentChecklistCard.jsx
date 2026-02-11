@@ -7,7 +7,7 @@ import {
   LoadingSpinner,
   hubspot
 } from '@hubspot/ui-extensions';
-import { BACKEND_URL } from '../../config';
+import { BACKEND_URL } from '../config';
 
 hubspot.extend(({ context }) => (
   <DocumentChecklistCard context={context} />
@@ -56,7 +56,7 @@ function DocumentChecklistCard({ context }) {
         <Tag>Unable to load</Tag>
         <Text variant="microcopy">
           Could not reach the Cohesion Portal. Ensure the portal is deployed and
-          BACKEND_URL in hubspot/src/config.js matches your deployment. Use the
+          BACKEND_URL in hubspot/src/app/config.js matches your deployment. Use the
           admin dashboard for full editing.
         </Text>
       </Flex>

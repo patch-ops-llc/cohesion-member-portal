@@ -8,8 +8,8 @@ HubSpot CRM card for the `p_client_projects` custom object. Displays document ch
 hubspot/
 ├── hsproject.json           # Project config
 ├── src/
-│   ├── config.js                 # BACKEND_URL (update for your deployment)
 │   └── app/
+│       ├── config.js             # BACKEND_URL (update for your deployment)
 │       ├── app-hsmeta.json       # App config (permittedUrls, scopes)
 │       └── cards/
 │           ├── DocumentChecklistCard.jsx
@@ -19,7 +19,7 @@ hubspot/
 
 ## Setup
 
-1. **Configure the backend URL** in `src/config.js`:
+1. **Configure the backend URL** in `src/app/config.js`:
    - Set `BACKEND_URL` to your deployed Cohesion Portal URL (e.g. `https://your-app.up.railway.app`)
    - Ensure the same URL is in `src/app/app-hsmeta.json` → `config.permittedUrls.fetch`
 
