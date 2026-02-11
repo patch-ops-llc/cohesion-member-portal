@@ -23,12 +23,15 @@ export function CategorySection({
   label,
   status,
   documents,
-  onToggle,
+  onToggle: _onToggle,
   onAddDocument,
   onUpdateDocumentName,
-  onUpdateDocumentStatus,
+  onUpdateDocumentStatus: _onUpdateDocumentStatus,
   onRemoveDocument
 }: CategorySectionProps) {
+  // Note: onToggle and onUpdateDocumentStatus are passed for future admin functionality
+  void _onToggle;
+  void _onUpdateDocumentStatus;
   const [isExpanded, setIsExpanded] = useState(status === 'active');
   const [isAddingDocument, setIsAddingDocument] = useState(false);
   const [newDocName, setNewDocName] = useState('');

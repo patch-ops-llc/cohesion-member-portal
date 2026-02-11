@@ -19,7 +19,7 @@ export function useDocumentData({ initialData, onSave }: UseDocumentDataOptions)
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasChangesRef = useRef(false);
 
   // Reset when initial data changes
