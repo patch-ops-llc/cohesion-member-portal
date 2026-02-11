@@ -10,7 +10,7 @@
     "build": "npm run build:frontend && npm run build:backend",
     "build:frontend": "npm run build --prefix frontend",
     "build:backend": "npm run build --prefix backend && npm run db:generate --prefix backend",
-    "start": "npm start --prefix backend",
+    "start": "node backend/dist/index.js",
     "db:migrate": "npm run db:migrate --prefix backend",
     "db:migrate:prod": "npm run db:migrate:prod --prefix backend",
     "db:generate": "npm run db:generate --prefix backend",
