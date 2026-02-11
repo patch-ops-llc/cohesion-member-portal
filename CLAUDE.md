@@ -57,6 +57,7 @@ See `HANDOFF.md` for the merge algorithm implementation.
 ```
 frontend/          # React + TypeScript + Vite + Tailwind
 backend/           # Node.js + Express + TypeScript + Prisma
+hubspot/           # HubSpot UI Extension (CRM card on p_client_projects)
 ├── src/
 │   ├── routes/    # Express routes
 │   ├── services/  # HubSpot, email, storage services
@@ -73,6 +74,14 @@ cd frontend
 npm install
 npm run dev        # Start dev server (port 5173)
 npm run build      # Production build
+```
+
+### HubSpot UIE
+```bash
+cd hubspot
+hs project install-deps
+hs project upload   # Push to HubSpot
+hs project dev      # Local dev (use local.json to proxy to backend)
 ```
 
 ### Backend
@@ -103,14 +112,15 @@ docker-compose up -d  # Start PostgreSQL
 7. Backend associates Note with project
 8. Backend updates `document_data` status to `pending_review`
 
-### Magic Link Authentication
+### HubSpot-Validated Password Authentication
 
 1. User enters email on login page
-2. Backend creates magic link token, stores in DB with expiry
-3. Backend sends email with link
-4. User clicks link → frontend hits `/api/auth/verify/:token`
-5. Backend validates token, creates JWT session
-6. Frontend stores JWT, uses for all API requests
+2. Backend validates email exists in HubSpot (Contacts or p_client_projects)
+3. If no match → reject
+4. If match and no app user → show Set Password form (register)
+5. If match and existing app user → show password form (login)
+6. On success, backend returns JWT; frontend stores token for API requests
+7. Password reset: user requests reset → email with link → set new password
 
 ### Project Lookup
 

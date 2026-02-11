@@ -1,19 +1,21 @@
 import { useState, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Mail, ArrowRight, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 
-export function EmailLookupForm() {
+interface EmailLookupFormProps {
+  onValidated: (email: string, needsRegistration: boolean) => void;
+}
+
+export function EmailLookupForm({ onValidated }: EmailLookupFormProps) {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { login } = useAuth();
-  const navigate = useNavigate();
+  const { validateEmailAndNext } = useAuth();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    
+
     if (!email.trim()) {
       setError('Please enter your email address');
       return;
@@ -23,15 +25,17 @@ export function EmailLookupForm() {
     setError(null);
 
     try {
-      const success = await login(email.trim());
-      
-      if (success) {
-        navigate('/');
+      const result = await validateEmailAndNext(email.trim());
+
+      if (result?.success) {
+        onValidated(result.email, result.needsRegistration);
       } else {
-        setError('No projects found for this email address. Please check your email or contact support.');
+        setError(
+          'Email not found. Please use the email associated with your account or contact support.'
+        );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to look up projects');
+      setError(err instanceof Error ? err.message : 'Failed to validate email');
     } finally {
       setIsLoading(false);
     }
@@ -82,11 +86,11 @@ export function EmailLookupForm() {
           {isLoading ? (
             <>
               <LoadingSpinner size="sm" className="mr-2" />
-              Looking up projects...
+              Verifying...
             </>
           ) : (
             <>
-              View My Documents
+              Continue
               <ArrowRight className="h-4 w-4 ml-2" />
             </>
           )}

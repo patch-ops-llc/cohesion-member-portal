@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import * as hubspot from '../services/hubspot';
 import { AppError } from '../middleware/errorHandler';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import { mergeDocumentData, getNormalizedStage } from '../utils/documentData';
 import { modifiedFieldsSchema } from '../utils/validation';
@@ -9,19 +10,14 @@ import prisma from '../db/client';
 
 const router = Router();
 
-// POST /api/projects/lookup - Get all projects for an email
-router.post('/lookup', async (req, res, next) => {
+// GET /api/projects - Get all projects for authenticated user
+router.get('/', authMiddleware, async (req: AuthRequest, res, next) => {
   try {
-    const schema = z.object({
-      email: z.string().email()
-    });
-
-    const { email } = schema.parse(req.body);
+    const email = req.user!.email;
     const normalizedEmail = email.toLowerCase().trim();
 
     const projects = await hubspot.getProjectsByEmail(normalizedEmail);
 
-    // Transform projects for frontend
     const transformedProjects = projects.map(project => {
       const documentData = hubspot.parseDocumentData(project.properties.document_data);
       const stage = getNormalizedStage(project.properties.hs_pipeline_stage);
@@ -43,25 +39,15 @@ router.post('/lookup', async (req, res, next) => {
       projects: transformedProjects
     });
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      next(new AppError('Invalid email address', 400));
-    } else {
-      next(error);
-    }
+    next(error);
   }
 });
 
-// GET /api/projects/:id - Get single project (requires email query param for verification)
-router.get('/:id', async (req, res, next) => {
+// GET /api/projects/:id - Get single project (requires auth)
+router.get('/:id', authMiddleware, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    const email = req.query.email as string;
-
-    if (!email) {
-      throw new AppError('Email is required', 400);
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedEmail = req.user!.email.toLowerCase().trim();
     const project = await hubspot.getProject(id);
 
     // Verify user has access to this project
@@ -98,19 +84,18 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // PATCH /api/projects/:id/document-data - Update document data with merge
-router.patch('/:id/document-data', async (req, res, next) => {
+router.patch('/:id/document-data', authMiddleware, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
+    const normalizedEmail = req.user!.email.toLowerCase().trim();
     
     // Validate request body
     const schema = z.object({
-      email: z.string().email(),
       documentData: z.record(z.unknown()),
       modifiedFields: modifiedFieldsSchema
     });
 
-    const { email, documentData, modifiedFields } = schema.parse(req.body);
-    const normalizedEmail = email.toLowerCase().trim();
+    const { documentData, modifiedFields } = schema.parse(req.body);
 
     // Get current project and verify access
     const project = await hubspot.getProject(id);

@@ -257,6 +257,72 @@ export async function getOrCreateProjectFolder(
   }
 }
 
+export interface ContactInfo {
+  id: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+}
+
+// Search for contact by email (validates user is in HubSpot CRM)
+export async function findContactByEmail(email: string): Promise<ContactInfo | null> {
+  try {
+    const response = await axios.post<{
+      results?: Array<{ id: string; properties: { email?: string; firstname?: string; lastname?: string } }>;
+    }>(
+      'https://api.hubapi.com/crm/v3/objects/contacts/search',
+      {
+        filterGroups: [
+          {
+            filters: [
+              {
+                propertyName: 'email',
+                operator: 'EQ',
+                value: email.toLowerCase().trim()
+              }
+            ]
+          }
+        ],
+        properties: ['email', 'hs_object_id', 'firstname', 'lastname'],
+        limit: 1
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (response.data?.results && response.data.results.length > 0) {
+      const contact = response.data.results[0];
+      const props = contact.properties;
+      return {
+        id: contact.id,
+        email: props?.email || email,
+        firstName: props?.firstname?.trim() || undefined,
+        lastName: props?.lastname?.trim() || undefined
+      };
+    }
+    return null;
+  } catch (error) {
+    logger.error('Failed to search contact in HubSpot', { email, error: String(error) });
+    throw error;
+  }
+}
+
+// Validate email: must exist in HubSpot (contact OR have projects)
+// Uses both: contact in CRM and projects - contact is primary for "known user"
+export async function validateEmailInHubSpot(email: string): Promise<boolean> {
+  const normalizedEmail = email.toLowerCase().trim();
+  // Check 1: Contact exists in HubSpot
+  const contact = await findContactByEmail(normalizedEmail);
+  if (contact) return true;
+  // Check 2: Has projects in p_client_projects (fallback for clients not yet as contacts)
+  const projects = await getProjectsByEmail(normalizedEmail);
+  return projects.length > 0;
+}
+
 // Parse document_data safely
 export function parseDocumentData(documentDataStr: string | null | undefined): DocumentData {
   if (!documentDataStr) {

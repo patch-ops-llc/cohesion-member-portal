@@ -64,6 +64,10 @@ A consolidated web application for tax document management, replacing the existi
 cohesion-portal/
 ├── frontend/          # React + TypeScript + Vite
 ├── backend/           # Node.js + Express + TypeScript
+├── hubspot/           # HubSpot UI Extension (CRM card)
+│   └── src/app/
+│       ├── app-hsmeta.json
+│       └── cards/     # Document Checklist card
 ├── HANDOFF.md         # Complete build specification
 ├── CLAUDE.md          # AI builder guidance
 ├── docker-compose.yml # Local development database
@@ -88,6 +92,28 @@ cohesion-portal/
 - **Database**: PostgreSQL
 - **Storage**: AWS S3 or Railway Volume
 - **Hosting**: Railway
+
+## HubSpot UI Extension
+
+The `hubspot/` directory contains a CRM card that displays document checklist data on `p_client_projects` records in HubSpot.
+
+### Setup
+
+1. **Replace placeholder URLs** with your deployed Railway URL:
+   - `hubspot/src/app/app-hsmeta.json` → `permittedUrls.fetch`
+   - `hubspot/src/app/cards/DocumentChecklistCard.jsx` → `backendUrl` constant
+
+2. **Install dependencies and upload:**
+   ```bash
+   npm run hubspot:install
+   npm run hubspot:upload
+   ```
+
+3. **Local development** (proxy to local backend):
+   - Create `hubspot/src/app/local.json` with `{"proxy": {"https://cohesion-member-portal-production.up.railway.app": "http://localhost:3000"}}`
+   - Run `npm run hubspot:dev` and `npm run dev` (backend)
+
+4. **Add the card** to custom object record views in HubSpot: CRM → Customize → add "Document Checklist" card.
 
 ## Deployment
 

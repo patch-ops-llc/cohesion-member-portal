@@ -2,10 +2,10 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { z } from 'zod';
 import * as hubspot from '../services/hubspot';
 import * as storage from '../services/storage';
 import { AppError } from '../middleware/errorHandler';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { validateFile, allowedMimeTypes, maxFileSize } from '../utils/validation';
 import { logger } from '../utils/logger';
 import prisma from '../db/client';
@@ -31,26 +31,22 @@ if (!fs.existsSync(tmpDir)) {
   fs.mkdirSync(tmpDir, { recursive: true });
 }
 
-// POST /api/files/:projectId/upload - Upload file for a project
-router.post('/:projectId/upload', upload.single('file'), async (req, res, next) => {
+// POST /api/files/:projectId/upload - Upload file for a project (requires auth)
+router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (req: AuthRequest, res, next) => {
   try {
     const { projectId } = req.params;
-    const { email, categoryKey, documentIndex } = req.body;
+    const { categoryKey, documentIndex } = req.body;
     const file = req.file;
 
     if (!file) {
       throw new AppError('No file uploaded', 400);
     }
 
-    if (!email) {
-      throw new AppError('Email is required', 400);
-    }
-
     if (!categoryKey) {
       throw new AppError('Category key is required', 400);
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedEmail = req.user!.email.toLowerCase().trim();
 
     // Validate file
     const validation = validateFile(file);
@@ -164,15 +160,11 @@ router.post('/:projectId/upload', upload.single('file'), async (req, res, next) 
   }
 });
 
-// GET /api/files/:id - Get file info
-router.get('/:id', async (req, res, next) => {
+// GET /api/files/:id - Get file info (requires auth)
+router.get('/:id', authMiddleware, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
-    const email = req.query.email as string;
-
-    if (!email) {
-      throw new AppError('Email is required', 400);
-    }
+    const normalizedEmail = req.user!.email.toLowerCase().trim();
 
     const fileUpload = await prisma.fileUpload.findUnique({
       where: { id }
@@ -184,7 +176,7 @@ router.get('/:id', async (req, res, next) => {
 
     // Verify user has access to this project
     const project = await hubspot.getProject(fileUpload.projectId);
-    if (project.properties.email?.toLowerCase().trim() !== email.toLowerCase().trim()) {
+    if (project.properties.email?.toLowerCase().trim() !== normalizedEmail) {
       throw new AppError('Access denied', 403);
     }
 

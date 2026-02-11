@@ -10,7 +10,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children }: LayoutProps) {
-  const { isAuthenticated, email, logout } = useAuth();
+  const { isAuthenticated, displayName, email, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -21,7 +21,7 @@ export function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-primary text-white shadow-lg">
+      <header className="bg-slate-100 border-b border-slate-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
@@ -34,12 +34,14 @@ export function Layout({ children }: LayoutProps) {
             </Link>
 
             {/* User menu */}
-            {isAuthenticated && email && (
+            {isAuthenticated && (displayName || email) && (
               <div className="flex items-center space-x-4">
-                <span className="text-sm hidden sm:block">{email}</span>
+                <span className="text-sm text-slate-600 hidden sm:block">
+                  {displayName || email}
+                </span>
                 <button
                   onClick={handleLogout}
-                  className="flex items-center space-x-1 px-3 py-2 rounded-lg hover:bg-primary-800 transition-colors"
+                  className="flex items-center space-x-1 px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"
                 >
                   <LogOut className="h-4 w-4" />
                   <span className="hidden sm:inline">Exit</span>

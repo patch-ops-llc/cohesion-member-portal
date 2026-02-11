@@ -1,0 +1,11 @@
+{
+  "uid": "cohesion-document-checklist-card",
+  "type": "card",
+  "config": {
+    "name": "Document Checklist",
+    "description": "View document categories and statuses for this client project.",
+    "location": "crm.record.tab",
+    "entrypoint": "/app/cards/DocumentChecklistCard.jsx",
+    "objectTypes": ["p_client_projects"]
+  }
+}

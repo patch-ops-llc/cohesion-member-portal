@@ -1,16 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { lookupProjects, getProject, updateDocumentData, uploadFile } from '../services/projects';
-import { getStoredEmail } from '../services/api';
+import { getProjects, getProject, updateDocumentData, uploadFile } from '../services/projects';
+import { getAuthToken } from '../services/api';
 import type { DocumentData, ModifiedFields } from '../types';
 
-// Hook to get all projects for current email
+// Hook to get all projects for authenticated user
 export function useProjects() {
-  const email = getStoredEmail();
-  
+  const token = getAuthToken();
+
   return useQuery({
-    queryKey: ['projects', email],
-    queryFn: () => lookupProjects(email || ''),
-    enabled: !!email,
+    queryKey: ['projects', token],
+    queryFn: getProjects,
+    enabled: !!token,
     staleTime: 30000,
     retry: 2
   });
@@ -32,9 +32,9 @@ export function useUpdateDocumentData(projectId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ documentData, modifiedFields }: { 
-      documentData: DocumentData; 
-      modifiedFields: ModifiedFields 
+    mutationFn: ({ documentData, modifiedFields }: {
+      documentData: DocumentData;
+      modifiedFields: ModifiedFields;
     }) => updateDocumentData(projectId, documentData, modifiedFields),
     onSuccess: (mergedData) => {
       queryClient.setQueryData(['project', projectId], (old: Awaited<ReturnType<typeof getProject>> | undefined) => {
@@ -56,10 +56,10 @@ export function useUploadFile(projectId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ file, categoryKey, documentIndex }: { 
-      file: File; 
-      categoryKey: string; 
-      documentIndex?: number 
+    mutationFn: ({ file, categoryKey, documentIndex }: {
+      file: File;
+      categoryKey: string;
+      documentIndex?: number;
     }) => uploadFile(projectId, file, categoryKey, documentIndex),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project', projectId] });

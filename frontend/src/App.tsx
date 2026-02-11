@@ -1,8 +1,13 @@
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Auth components
 import { EmailLookupForm } from './components/auth/EmailLookupForm';
+import { SetPasswordForm } from './components/auth/SetPasswordForm';
+import { LoginForm } from './components/auth/LoginForm';
+import { ForgotPasswordForm } from './components/auth/ForgotPasswordForm';
+import { ResetPasswordForm } from './components/auth/ResetPasswordForm';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
 // Shared components
@@ -54,6 +59,7 @@ function App() {
             <Routes>
               {/* Public routes */}
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
 
               {/* Protected client routes */}
               <Route
@@ -122,12 +128,52 @@ function App() {
   );
 }
 
-// Login page wrapper
+// Login page - multi-step: email → register or login
 function LoginPage() {
+  const [step, setStep] = React.useState<'email' | 'register' | 'login' | 'forgot'>('email');
+  const [email, setEmail] = React.useState('');
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
-        <EmailLookupForm />
+        {step === 'email' && (
+          <EmailLookupForm
+            onValidated={(e, needsRegistration) => {
+              setEmail(e);
+              setStep(needsRegistration ? 'register' : 'login');
+            }}
+          />
+        )}
+        {step === 'register' && (
+          <SetPasswordForm
+            email={email}
+            onBack={() => setStep('email')}
+          />
+        )}
+        {step === 'login' && (
+          <LoginForm
+            email={email}
+            onBack={() => setStep('email')}
+            onForgotPassword={() => setStep('forgot')}
+          />
+        )}
+        {step === 'forgot' && (
+          <ForgotPasswordForm
+            email={email}
+            onBack={() => setStep('login')}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Reset password page (from email link)
+function ResetPasswordPage() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
+        <ResetPasswordForm />
       </div>
     </div>
   );

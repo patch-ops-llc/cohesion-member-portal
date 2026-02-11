@@ -14,7 +14,10 @@
     "db:migrate": "npm run db:migrate --prefix backend",
     "db:migrate:prod": "npm run db:migrate:prod --prefix backend",
     "db:generate": "npm run db:generate --prefix backend",
-    "postinstall": "npm install --prefix backend && npm install --prefix frontend"
+    "postinstall": "npm install --prefix backend && npm install --prefix frontend",
+    "hubspot:install": "cd hubspot && hs project install-deps",
+    "hubspot:upload": "cd hubspot && hs project upload",
+    "hubspot:dev": "cd hubspot && hs project dev"
   },
   "engines": {
     "node": ">=20.0.0"
