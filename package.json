@@ -1,0 +1,25 @@
+{
+  "name": "cohesion-portal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cohesion Document Portal - Tax document management system",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "npm run build --prefix frontend",
+    "build:backend": "npm run build --prefix backend && npm run db:generate --prefix backend",
+    "start": "npm start --prefix backend",
+    "db:migrate": "npm run db:migrate --prefix backend",
+    "db:migrate:prod": "npm run db:migrate:prod --prefix backend",
+    "db:generate": "npm run db:generate --prefix backend",
+    "postinstall": "npm install --prefix backend && npm install --prefix frontend"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
