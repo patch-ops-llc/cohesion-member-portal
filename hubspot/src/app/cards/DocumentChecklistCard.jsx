@@ -18,7 +18,7 @@ function DocumentChecklistCard({ context }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const recordId = context?.crm?.recordId;
+  const recordId = context?.crm?.objectId ?? context?.crm?.recordId;
 
   useEffect(() => {
     if (!recordId) {

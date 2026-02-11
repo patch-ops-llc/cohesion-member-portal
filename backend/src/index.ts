@@ -25,12 +25,23 @@ app.use(helmet({
 }));
 
 // CORS configuration - HubSpot UIE requires app.hubspot.com / app-eu1.hubspot.com
+const hubspotOrigins = [
+  'https://app.hubspot.com',
+  'https://app-eu1.hubspot.com',
+  'https://app.hubspot.eu',
+  'https://app-eu1.hubspot.eu'
+];
 const defaultOrigins = process.env.NODE_ENV === 'production'
-  ? ['https://app.hubspot.com', 'https://app-eu1.hubspot.com', 'https://app.hubspot.eu', 'https://cohesion-member-portal-production.up.railway.app']
+  ? [...hubspotOrigins.filter(o => !o.includes('*')), 'https://cohesion-member-portal-production.up.railway.app']
   : ['http://localhost:5173'];
-const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((o: string) => o.trim()).filter(Boolean) || defaultOrigins;
+const corsOriginsList = process.env.CORS_ORIGINS?.split(',').map((o: string) => o.trim()).filter(Boolean) || defaultOrigins;
 app.use(cors({
-  origin: corsOrigins,
+  origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin) return cb(null, true);
+    if (corsOriginsList.includes(origin)) return cb(null, true);
+    if (origin.endsWith('.hubspot.com')) return cb(null, true);
+    cb(null, false);
+  },
   credentials: true
 }));
 
