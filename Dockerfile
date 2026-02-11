@@ -55,5 +55,5 @@ ENV PORT=3000
 # Expose port
 EXPOSE 3000
 
-# Start the server
-CMD ["npm", "start", "--prefix", "backend"]
+# Start script that runs migrations then starts server
+CMD ["sh", "-c", "cd backend && npx prisma migrate deploy && node dist/index.js"]
