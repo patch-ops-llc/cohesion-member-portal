@@ -115,6 +115,7 @@ function DocumentChecklistWrapper({ projectId, initialData, onSave, isSaving }: 
         onUpdateDocumentName={updateDocumentName}
         onUpdateDocumentStatus={updateDocumentStatus}
         onRemoveDocument={removeDocument}
+        clientMode={true}
       />
     </div>
   );

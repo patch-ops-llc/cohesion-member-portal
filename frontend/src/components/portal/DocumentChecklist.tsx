@@ -10,6 +10,9 @@ interface DocumentChecklistProps {
   onUpdateDocumentName: (categoryKey: string, docIndex: number, name: string) => void;
   onUpdateDocumentStatus: (categoryKey: string, docIndex: number, status: DocumentStatus) => void;
   onRemoveDocument: (categoryKey: string, docIndex: number) => void;
+  /** When true, client view: hide add/edit/remove, show only upload */
+  clientMode?: boolean;
+  isSaving?: boolean;
 }
 
 export function DocumentChecklist({
@@ -19,7 +22,8 @@ export function DocumentChecklist({
   onAddDocument,
   onUpdateDocumentName,
   onUpdateDocumentStatus,
-  onRemoveDocument
+  onRemoveDocument,
+  clientMode = false
 }: DocumentChecklistProps) {
   const selectedSections = documentData._meta?.selectedSections || ['personal'];
   const showPersonal = selectedSections.includes('personal');
@@ -56,6 +60,8 @@ export function DocumentChecklist({
                     onUpdateDocumentStatus(cat.key, docIndex, status)
                   }
                   onRemoveDocument={(docIndex) => onRemoveDocument(cat.key, docIndex)}
+                  clientMode={clientMode}
+                  isSaving={isSaving}
                 />
               );
             })}
@@ -92,6 +98,8 @@ export function DocumentChecklist({
                     onUpdateDocumentStatus(cat.key, docIndex, status)
                   }
                   onRemoveDocument={(docIndex) => onRemoveDocument(cat.key, docIndex)}
+                  clientMode={clientMode}
+                  isSaving={isSaving}
                 />
               );
             })}

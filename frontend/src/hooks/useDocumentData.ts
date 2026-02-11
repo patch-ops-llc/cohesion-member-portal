@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { DocumentData, CategoryData, ModifiedFields, DocumentStatus } from '../types';
+import { personalCategories, entityCategories } from '../types';
 
 const DEBOUNCE_MS = 800;
 
@@ -105,16 +106,27 @@ export function useDocumentData({ initialData, onSave }: UseDocumentDataOptions)
   const addDocument = useCallback((categoryKey: string, documentName: string) => {
     setDocumentData(prev => {
       const category = prev[categoryKey] as CategoryData | undefined;
-      if (!category || 'selectedSections' in category) return prev;
+      const categoryDef = [...personalCategories, ...entityCategories].find(c => c.key === categoryKey);
+      const label = categoryDef?.label ?? categoryKey;
 
+      if (category && !('selectedSections' in category)) {
+        return {
+          ...prev,
+          [categoryKey]: {
+            ...category,
+            documents: [
+              ...category.documents,
+              { name: documentName, status: 'not_submitted' as DocumentStatus }
+            ]
+          }
+        };
+      }
       return {
         ...prev,
         [categoryKey]: {
-          ...category,
-          documents: [
-            ...category.documents,
-            { name: documentName, status: 'not_submitted' as DocumentStatus }
-          ]
+          label,
+          status: 'active' as const,
+          documents: [{ name: documentName, status: 'not_submitted' as DocumentStatus }]
         }
       };
     });

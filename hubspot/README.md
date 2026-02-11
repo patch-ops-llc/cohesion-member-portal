@@ -22,6 +22,7 @@ hubspot/
 1. **Configure the backend URL** in `src/app/config.js`:
    - Set `BACKEND_URL` to your deployed Cohesion Portal URL (e.g. `https://your-app.up.railway.app`)
    - Ensure the same URL is in `src/app/app-hsmeta.json` → `config.permittedUrls.fetch`
+   - If you see "Could not reach the Cohesion Portal": verify the portal is deployed, BACKEND_URL matches your deployment, and CORS_ORIGINS includes HubSpot domains (https://app.hubspot.com, https://app-eu1.hubspot.com)
 
 2. **Install dependencies:**
    ```bash

@@ -15,6 +15,9 @@ interface CategorySectionProps {
   onUpdateDocumentName: (docIndex: number, name: string) => void;
   onUpdateDocumentStatus: (docIndex: number, status: DocumentStatus) => void;
   onRemoveDocument: (docIndex: number) => void;
+  /** When true, client view: hide Add Document, pass clientMode to DocumentItem */
+  clientMode?: boolean;
+  isSaving?: boolean;
 }
 
 export function CategorySection({
@@ -23,15 +26,14 @@ export function CategorySection({
   label,
   status,
   documents,
-  onToggle: _onToggle,
+  onToggle,
   onAddDocument,
   onUpdateDocumentName,
-  onUpdateDocumentStatus: _onUpdateDocumentStatus,
-  onRemoveDocument
+  onUpdateDocumentStatus,
+  onRemoveDocument,
+  clientMode = false,
+  isSaving = false
 }: CategorySectionProps) {
-  // Note: onToggle and onUpdateDocumentStatus are passed for future admin functionality
-  void _onToggle;
-  void _onUpdateDocumentStatus;
   const [isExpanded, setIsExpanded] = useState(status === 'active');
   const [isAddingDocument, setIsAddingDocument] = useState(false);
   const [newDocName, setNewDocName] = useState('');
@@ -100,6 +102,21 @@ export function CategorySection({
         </div>
 
         <div className="flex items-center space-x-2">
+          {!clientMode && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle();
+              }}
+              className={clsx(
+                'px-2 py-0.5 text-xs rounded-full',
+                isActive ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              )}
+              title={isActive ? 'Click to deactivate category' : 'Click to activate category'}
+            >
+              {isActive ? 'Active' : 'Inactive'}
+            </button>
+          )}
           <span className="text-sm text-gray-500">
             {documents.length} document{documents.length !== 1 ? 's' : ''}
           </span>
@@ -123,6 +140,9 @@ export function CategorySection({
                 document={doc}
                 onUpdateName={(name) => onUpdateDocumentName(index, name)}
                 onRemove={() => onRemoveDocument(index)}
+                onUpdateStatus={!clientMode ? (status) => onUpdateDocumentStatus(index, status) : undefined}
+                clientMode={clientMode}
+                isSaving={isSaving}
               />
             ))
           )}
@@ -162,7 +182,7 @@ export function CategorySection({
                 Cancel
               </button>
             </div>
-          ) : (
+          ) : !clientMode ? (
             <button
               onClick={() => setIsAddingDocument(true)}
               className="flex items-center space-x-2 text-primary hover:text-primary-800 text-sm font-medium mt-2"
@@ -170,7 +190,7 @@ export function CategorySection({
               <Plus className="h-4 w-4" />
               <span>Add Document</span>
             </button>
-          )}
+          ) : null}
         </div>
       )}
     </div>
