@@ -39,10 +39,18 @@ router.get('/projects/:id', async (req, res, next) => {
 router.patch('/projects/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { documentData: localData, modifiedFields } = req.body as {
-      documentData: DocumentData;
-      modifiedFields: ModifiedFields;
-    };
+    let body = req.body;
+
+    // HubSpot hubspot.fetch may send body as string when Content-Type is missing
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body) as { documentData: DocumentData; modifiedFields: ModifiedFields };
+      } catch {
+        return res.status(400).json({ error: 'Invalid JSON body' });
+      }
+    }
+
+    const { documentData: localData, modifiedFields } = body;
 
     if (!localData || !modifiedFields) {
       return res.status(400).json({ error: 'documentData and modifiedFields required' });

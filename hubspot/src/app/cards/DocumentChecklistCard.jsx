@@ -184,8 +184,7 @@ function DocumentChecklistCard({ context }) {
 
       const res = await hubspot.fetch(`${BACKEND_URL}/api/cards/projects/${recordId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentData, modifiedFields })
+        body: { documentData, modifiedFields }
       });
 
       if (!res.ok) {
@@ -273,6 +272,7 @@ function DocumentChecklistCard({ context }) {
       ...prev,
       categories: { ...prev.categories, [categoryKey]: true }
     }));
+    setAutoSaveTrigger((prev) => prev + 1);
   };
 
   const removeDocument = (categoryKey, inputId) => {
@@ -303,6 +303,7 @@ function DocumentChecklistCard({ context }) {
         [categoryKey]: { ...(prev.documents[categoryKey] || {}), [idx]: true }
       }
     }));
+    setAutoSaveTrigger((prev) => prev + 1);
   };
 
   const handleStatusChange = (categoryKey, inputId, value) => {
@@ -480,6 +481,26 @@ function DocumentChecklistCard({ context }) {
       <Divider />
 
       <Flex justify="end" gap="small" style={{ marginTop: '16px' }}>
+        <Button
+          variant="primary"
+          size="small"
+          onClick={() => {
+            const categoriesToSave = (selectedSections === 'personal' ? personalCategories : entityCategories).reduce(
+              (acc, c) => ({ ...acc, [c.key]: true }),
+              {}
+            );
+            setModifiedFields({
+              sections: true,
+              categories: categoriesToSave,
+              documents: {},
+              statuses: {}
+            });
+            setAutoSaveTrigger((prev) => prev + 1);
+          }}
+          disabled={saving}
+        >
+          Save
+        </Button>
         <Button variant="secondary" size="small" onClick={loadData} disabled={loading}>
           Refresh
         </Button>
@@ -498,8 +519,7 @@ function DocumentChecklistCard({ context }) {
               });
               const res = await hubspot.fetch(`${BACKEND_URL}/api/cards/projects/${recordId}`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+                body: {
                   documentData: clearedData,
                   modifiedFields: {
                     sections: true,
@@ -507,7 +527,7 @@ function DocumentChecklistCard({ context }) {
                     documents: {},
                     statuses: {}
                   }
-                })
+                }
               });
               if (res.ok) {
                 const catState = {};
