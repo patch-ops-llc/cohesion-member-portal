@@ -23,7 +23,7 @@ router.get('/projects/:id', async (req, res, next) => {
 
     logger.info('Card fetch', { projectId: id });
 
-    res.json({ documentData });
+    res.json({ documentData, email: project.properties.email || null });
   } catch (error) {
     next(error);
   }

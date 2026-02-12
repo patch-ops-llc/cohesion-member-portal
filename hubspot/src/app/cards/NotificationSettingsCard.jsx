@@ -52,30 +52,16 @@ function NotificationSettingsCard({ context }) {
     setError(null);
 
     try {
-      // Get the project to find the email
+      // Get the project from the backend - it returns the email along with documentData
       const projectRes = await hubspot.fetch(
         `${BACKEND_URL}/api/cards/projects/${recordId}`
       );
       const projectData = await projectRes.json();
 
-      // The cards endpoint returns documentData - we need the email from the project
-      // Try to get email from the CRM context properties
-      let contactEmail = null;
-
-      // Try fetching the CRM record properties for email
-      try {
-        const crmRes = await hubspot.fetch(
-          `https://api.hubapi.com/crm/v3/objects/2-171216725/${recordId}?properties=email`
-        );
-        const crmData = await crmRes.json();
-        contactEmail = crmData?.properties?.email;
-      } catch (e) {
-        // Fallback - try context
-        contactEmail = context?.crm?.properties?.email;
-      }
+      const contactEmail = projectData?.email;
 
       if (!contactEmail) {
-        setError('Could not determine contact email for this project. Ensure the project has an email property.');
+        setError('No email found for this project. Ensure the project has an email property set in HubSpot.');
         setLoading(false);
         return;
       }
@@ -98,7 +84,7 @@ function NotificationSettingsCard({ context }) {
     } finally {
       setLoading(false);
     }
-  }, [recordId, context]);
+  }, [recordId]);
 
   useEffect(() => {
     loadData();
