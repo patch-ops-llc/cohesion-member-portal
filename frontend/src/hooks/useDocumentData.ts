@@ -188,6 +188,24 @@ export function useDocumentData({ initialData, onSave }: UseDocumentDataOptions)
     triggerSave();
   }, [triggerSave]);
 
+  // Optimistic status update (e.g. after file upload - backend already persisted)
+  const setDocumentStatusOptimistic = useCallback((categoryKey: string, docIndex: number, status: DocumentStatus) => {
+    setDocumentData(prev => {
+      const category = prev[categoryKey] as CategoryData | undefined;
+      if (!category || 'selectedSections' in category) return prev;
+
+      const documents = [...category.documents];
+      if (documents[docIndex]) {
+        documents[docIndex] = { ...documents[docIndex], status };
+      }
+
+      return {
+        ...prev,
+        [categoryKey]: { ...category, documents }
+      };
+    });
+  }, []);
+
   // Remove document
   const removeDocument = useCallback((categoryKey: string, docIndex: number) => {
     setDocumentData(prev => {
@@ -229,6 +247,7 @@ export function useDocumentData({ initialData, onSave }: UseDocumentDataOptions)
     addDocument,
     updateDocumentName,
     updateDocumentStatus,
+    setDocumentStatusOptimistic,
     removeDocument
   };
 }

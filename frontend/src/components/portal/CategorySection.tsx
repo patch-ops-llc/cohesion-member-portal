@@ -15,6 +15,8 @@ interface CategorySectionProps {
   onUpdateDocumentName: (docIndex: number, name: string) => void;
   onUpdateDocumentStatus: (docIndex: number, status: DocumentStatus) => void;
   onRemoveDocument: (docIndex: number) => void;
+  /** Called when file upload succeeds - (docIndex) => void */
+  onUploadSuccess?: (docIndex: number) => void;
   /** When true, client view: hide Add Document, pass clientMode to DocumentItem */
   clientMode?: boolean;
   isSaving?: boolean;
@@ -31,6 +33,7 @@ export function CategorySection({
   onUpdateDocumentName,
   onUpdateDocumentStatus,
   onRemoveDocument,
+  onUploadSuccess,
   clientMode = false,
   isSaving = false
 }: CategorySectionProps) {
@@ -141,6 +144,7 @@ export function CategorySection({
                 onUpdateName={(name) => onUpdateDocumentName(index, name)}
                 onRemove={() => onRemoveDocument(index)}
                 onUpdateStatus={!clientMode ? (status) => onUpdateDocumentStatus(index, status) : undefined}
+                onUploadSuccess={onUploadSuccess ? () => onUploadSuccess(index) : undefined}
                 clientMode={clientMode}
                 isSaving={isSaving}
               />

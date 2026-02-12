@@ -11,24 +11,24 @@ export function PizzaTracker({ currentStage }: PizzaTrackerProps) {
   const currentIndex = pipelineStages.findIndex(s => s.id === currentStage);
 
   return (
-    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-      <h2 className="text-lg font-semibold text-gray-900 mb-6 text-center">
+    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 w-full">
+      <h2 className="text-lg font-semibold text-gray-900 mb-6 text-left">
         Project Progress
       </h2>
       
-      <div className="flex items-center justify-between">
+      <div className="flex items-start w-full">
         {pipelineStages.map((stage, index) => {
           const isCompleted = index < currentIndex;
           const isCurrent = index === currentIndex;
           const isPending = index > currentIndex;
 
           return (
-            <div key={stage.id} className="flex items-center flex-1">
+            <div key={stage.id} className="flex items-center flex-1 min-w-0">
               {/* Step */}
-              <div className="flex flex-col items-center">
+              <div className="flex flex-col items-center flex-1 min-w-0">
                 <div
                   className={clsx(
-                    'w-12 h-12 rounded-full flex items-center justify-center font-semibold text-sm transition-all',
+                    'w-12 h-12 rounded-full flex items-center justify-center font-semibold text-sm transition-all flex-shrink-0',
                     isCompleted && 'bg-primary text-white',
                     isCurrent && 'bg-accent text-white animate-pizza-pulse',
                     isPending && 'bg-gray-200 text-gray-500'
@@ -42,7 +42,7 @@ export function PizzaTracker({ currentStage }: PizzaTrackerProps) {
                 </div>
                 <span
                   className={clsx(
-                    'mt-2 text-xs font-medium text-center max-w-[100px]',
+                    'mt-2 text-xs font-medium text-center w-full px-1',
                     isCompleted && 'text-primary',
                     isCurrent && 'text-accent',
                     isPending && 'text-gray-400'
@@ -52,11 +52,11 @@ export function PizzaTracker({ currentStage }: PizzaTrackerProps) {
                 </span>
               </div>
 
-              {/* Connector line */}
+              {/* Connector line - fills remaining space */}
               {index < pipelineStages.length - 1 && (
                 <div
                   className={clsx(
-                    'flex-1 h-1 mx-2',
+                    'flex-1 h-1 mx-2 self-center',
                     index < currentIndex ? 'bg-primary' : 'bg-gray-200'
                   )}
                 />

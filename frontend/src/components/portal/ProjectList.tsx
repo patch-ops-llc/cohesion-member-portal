@@ -58,43 +58,41 @@ function ProjectCard({ project }: { project: Project }) {
       to={`/project/${project.id}`}
       className="card p-6 hover:shadow-md transition-shadow group block w-full"
     >
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-        {/* Left: Project info & stage */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-4 mb-3">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-primary-50 rounded-lg shrink-0">
-                <FileText className="h-6 w-6 text-primary" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="font-semibold text-gray-900 group-hover:text-primary transition-colors truncate">
-                  {project.name}
-                </h3>
-                <p className="text-sm text-gray-500">{project.email}</p>
-              </div>
+      <div className="flex flex-col md:flex-row md:items-stretch gap-6">
+        {/* Main content */}
+        <div className="flex-1 min-w-0 flex flex-col gap-4">
+          {/* Project header */}
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-primary-50 rounded-lg shrink-0">
+              <FileText className="h-6 w-6 text-primary" />
             </div>
-            <ArrowRight className="h-5 w-5 text-gray-400 group-hover:text-primary transition-colors shrink-0" />
+            <div className="min-w-0 flex-1">
+              <h3 className="font-semibold text-gray-900 group-hover:text-primary transition-colors truncate">
+                {project.name}
+              </h3>
+              <p className="text-sm text-gray-500 truncate">{project.email}</p>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 mb-4">
+          {/* Stage badge & file directory */}
+          <div className="flex flex-wrap items-center gap-3">
             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-primary-50 text-primary">
               {currentStageLabel}
             </span>
             {project.fileDirectory && (
               <span className="inline-flex items-center gap-1.5 text-sm text-gray-500">
-                <Folder className="h-4 w-4" />
+                <Folder className="h-4 w-4 shrink-0" />
                 <span className="truncate max-w-[200px]">{project.fileDirectory}</span>
               </span>
             )}
           </div>
 
-          <div className="mb-4">
+          {/* Status bar */}
+          <div>
             <PizzaTrackerMini currentStage={project.stage} />
           </div>
-        </div>
 
-        {/* Right: Stats & category breakdown */}
-        <div className="flex flex-col sm:flex-row gap-4 md:min-w-[360px]">
+          {/* Stats cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div className="bg-gray-50 rounded-lg p-3 text-center">
               <div className="font-semibold text-gray-900">{stats.total}</div>
@@ -111,14 +109,15 @@ function ProjectCard({ project }: { project: Project }) {
             <div className="bg-red-50 rounded-lg p-3 text-center">
               <div className="font-semibold text-red-700">{stats.needsAction}</div>
               <div className="text-xs text-red-600 flex items-center justify-center gap-1">
-                <AlertCircle className="h-3 w-3" />
+                <AlertCircle className="h-3 w-3 shrink-0" />
                 Needs action
               </div>
             </div>
           </div>
 
+          {/* Document categories */}
           {categoryBreakdown.length > 0 && (
-            <div className="flex-1 min-w-0">
+            <div>
               <div className="text-xs font-medium text-gray-500 mb-2">Document categories</div>
               <div className="flex flex-wrap gap-2">
                 {categoryBreakdown.map(({ label, count }) => (
@@ -132,6 +131,16 @@ function ProjectCard({ project }: { project: Project }) {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Right: Prominent open/arrow CTA */}
+        <div className="flex items-center justify-end md:justify-center md:border-l md:border-gray-200 md:pl-6 shrink-0 pt-2 md:pt-0 md:self-center">
+          <div className="flex items-center gap-3 text-primary">
+            <span className="text-sm font-medium">View project</span>
+            <div className="flex items-center justify-center w-11 h-11 rounded-full bg-primary-50 border-2 border-primary/20 group-hover:bg-primary group-hover:border-primary group-hover:text-white transition-all">
+              <ArrowRight className="h-5 w-5 group-hover:translate-x-0.5 transition-transform" />
+            </div>
+          </div>
         </div>
       </div>
     </Link>

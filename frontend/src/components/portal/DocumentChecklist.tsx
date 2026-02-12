@@ -10,6 +10,8 @@ interface DocumentChecklistProps {
   onUpdateDocumentName: (categoryKey: string, docIndex: number, name: string) => void;
   onUpdateDocumentStatus: (categoryKey: string, docIndex: number, status: DocumentStatus) => void;
   onRemoveDocument: (categoryKey: string, docIndex: number) => void;
+  /** Called when file upload succeeds - updates status to pending_review in real time */
+  onUploadSuccess?: (categoryKey: string, docIndex: number) => void;
   /** When true, client view: hide add/edit/remove, show only upload */
   clientMode?: boolean;
   isSaving?: boolean;
@@ -23,6 +25,7 @@ export function DocumentChecklist({
   onUpdateDocumentName,
   onUpdateDocumentStatus,
   onRemoveDocument,
+  onUploadSuccess,
   clientMode = false,
   isSaving = false
 }: DocumentChecklistProps) {
@@ -30,19 +33,22 @@ export function DocumentChecklist({
   const showPersonal = selectedSections.includes('personal');
   const showEntity = selectedSections.includes('entity');
 
+  // Sort: active categories first
+  const sortByActive = (cats: typeof personalCategories) =>
+    [...cats].sort((a, b) => {
+      const aActive = (documentData[a.key] as CategoryData | undefined)?.status === 'active' ? 0 : 1;
+      const bActive = (documentData[b.key] as CategoryData | undefined)?.status === 'active' ? 0 : 1;
+      return aActive - bActive;
+    });
+
   return (
     <div className="space-y-6">
       {/* Personal categories */}
       {showPersonal && (
         <div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <span className="bg-primary-50 text-primary px-3 py-1 rounded-full text-sm mr-3">
-              Personal
-            </span>
-            Personal Tax Documents
-          </h3>
+          <h3 className="text-sm font-medium text-gray-500 mb-3">Personal</h3>
           <div className="space-y-4">
-            {personalCategories.map((cat) => {
+            {sortByActive(personalCategories).map((cat) => {
               const categoryData = documentData[cat.key] as CategoryData | undefined;
               return (
                 <CategorySection
@@ -61,6 +67,7 @@ export function DocumentChecklist({
                     onUpdateDocumentStatus(cat.key, docIndex, status)
                   }
                   onRemoveDocument={(docIndex) => onRemoveDocument(cat.key, docIndex)}
+                  onUploadSuccess={onUploadSuccess ? (docIndex) => onUploadSuccess(cat.key, docIndex) : undefined}
                   clientMode={clientMode}
                   isSaving={isSaving}
                 />
@@ -73,14 +80,9 @@ export function DocumentChecklist({
       {/* Entity categories */}
       {showEntity && (
         <div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <span className="bg-accent-50 text-accent-600 px-3 py-1 rounded-full text-sm mr-3">
-              Entity
-            </span>
-            Entity Tax Documents
-          </h3>
+          <h3 className="text-sm font-medium text-gray-500 mb-3">Entity</h3>
           <div className="space-y-4">
-            {entityCategories.map((cat) => {
+            {sortByActive(entityCategories).map((cat) => {
               const categoryData = documentData[cat.key] as CategoryData | undefined;
               return (
                 <CategorySection
@@ -99,6 +101,7 @@ export function DocumentChecklist({
                     onUpdateDocumentStatus(cat.key, docIndex, status)
                   }
                   onRemoveDocument={(docIndex) => onRemoveDocument(cat.key, docIndex)}
+                  onUploadSuccess={onUploadSuccess ? (docIndex) => onUploadSuccess(cat.key, docIndex) : undefined}
                   clientMode={clientMode}
                   isSaving={isSaving}
                 />

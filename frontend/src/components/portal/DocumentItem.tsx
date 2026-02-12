@@ -14,6 +14,8 @@ interface DocumentItemProps {
   onUpdateName: (name: string) => void;
   onRemove: () => void;
   onUpdateStatus?: (status: DocumentStatus) => void;
+  /** Called when file upload succeeds - updates status to pending_review in real time */
+  onUploadSuccess?: () => void;
   /** When true, client view: only show upload, hide edit/remove */
   clientMode?: boolean;
   isSaving?: boolean;
@@ -27,6 +29,7 @@ export function DocumentItem({
   onUpdateName,
   onRemove,
   onUpdateStatus,
+  onUploadSuccess,
   clientMode = false,
   isSaving = false
 }: DocumentItemProps) {
@@ -166,7 +169,10 @@ export function DocumentItem({
             projectId={projectId}
             categoryKey={categoryKey}
             documentIndex={documentIndex}
-            onSuccess={() => setShowUpload(false)}
+            onSuccess={() => {
+              onUploadSuccess?.();
+              setShowUpload(false);
+            }}
           />
         </div>
       )}

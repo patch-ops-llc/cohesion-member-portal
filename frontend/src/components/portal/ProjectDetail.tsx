@@ -80,6 +80,7 @@ function DocumentChecklistWrapper({ projectId, initialData, onSave, isSaving }: 
     addDocument,
     updateDocumentName,
     updateDocumentStatus,
+    setDocumentStatusOptimistic,
     removeDocument
   } = useDocumentData({
     initialData,
@@ -90,7 +91,7 @@ function DocumentChecklistWrapper({ projectId, initialData, onSave, isSaving }: 
     <div className="space-y-4">
       {/* Save indicator */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900">Document Checklist</h2>
+        <h2 className="text-xl font-semibold text-gray-900">Documents</h2>
         <div className="flex items-center space-x-2 text-sm">
           {(isSaving || isAutoSaving) && (
             <span className="text-gray-500 flex items-center">
@@ -115,6 +116,9 @@ function DocumentChecklistWrapper({ projectId, initialData, onSave, isSaving }: 
         onUpdateDocumentName={updateDocumentName}
         onUpdateDocumentStatus={updateDocumentStatus}
         onRemoveDocument={removeDocument}
+        onUploadSuccess={(categoryKey, docIndex) =>
+          setDocumentStatusOptimistic(categoryKey, docIndex, 'pending_review')
+        }
         clientMode={true}
       />
     </div>
