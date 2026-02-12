@@ -17,6 +17,7 @@ import { ErrorBoundary } from './components/shared/ErrorBoundary';
 // Portal components
 import { ProjectList } from './components/portal/ProjectList';
 import { ProjectDetail } from './components/portal/ProjectDetail';
+import { NotificationSettings } from './components/portal/NotificationSettings';
 
 // Admin components
 import { AdminLayout } from './components/admin/AdminLayout';
@@ -25,6 +26,7 @@ import { Dashboard } from './components/admin/Dashboard';
 import { ProjectManager } from './components/admin/ProjectManager';
 import { ProjectEditor } from './components/admin/ProjectEditor';
 import { AuditLog } from './components/admin/AuditLog';
+import { AdminNotificationSettings } from './components/admin/NotificationSettings';
 
 // Auth provider
 import { AuthProvider } from './hooks/useAuth';
@@ -82,6 +84,16 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/settings/notifications"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <NotificationSettings />
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Admin routes */}
               <Route path="/admin/login" element={<AdminLogin />} />
@@ -114,6 +126,14 @@ function App() {
                 element={
                   <AdminRoute>
                     <AuditLog />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/notifications"
+                element={
+                  <AdminRoute>
+                    <AdminNotificationSettings />
                   </AdminRoute>
                 }
               />

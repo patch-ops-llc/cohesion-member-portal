@@ -1,0 +1,11 @@
+{
+  "uid": "cohesion-notification-settings-card",
+  "type": "card",
+  "config": {
+    "name": "Notification Settings",
+    "description": "Manage email notification preferences for this client project contact.",
+    "location": "crm.record.tab",
+    "entrypoint": "/app/cards/NotificationSettingsCard.jsx",
+    "objectTypes": ["p_client_projects"]
+  }
+}

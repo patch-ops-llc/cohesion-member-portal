@@ -63,6 +63,26 @@ model FileUpload {
   @@map("file_uploads")
 }
 
+// Notification preferences per user/email
+model NotificationPreference {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  // User-facing notifications
+  passwordReset        Boolean @default(true) @map("password_reset")
+  portalRegistration   Boolean @default(true) @map("portal_registration")
+  documentSubmission   Boolean @default(true) @map("document_submission")
+  weeklyUpdate         Boolean @default(true) @map("weekly_update")
+  // Admin notifications (for admin emails)
+  adminRegistration    Boolean @default(true) @map("admin_registration")
+  adminDocumentSubmission Boolean @default(true) @map("admin_document_submission")
+  adminWeeklyUpdate    Boolean @default(true) @map("admin_weekly_update")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@index([email])
+  @@map("notification_preferences")
+}
+
 // Audit log for tracking changes
 model AuditLog {
   id         String   @id @default(uuid())

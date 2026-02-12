@@ -113,6 +113,14 @@ router.post('/register', async (req, res, next) => {
 
     logger.info('User registered', { email: normalizedEmail, userId: user.id });
 
+    // Send registration emails (non-blocking)
+    emailService.sendRegistrationEmail(normalizedEmail, displayName).catch(err =>
+      logger.error('Failed to send registration email', { email: normalizedEmail, error: String(err) })
+    );
+    emailService.sendAdminRegistrationNotification(normalizedEmail, displayName).catch(err =>
+      logger.error('Failed to send admin registration notification', { email: normalizedEmail, error: String(err) })
+    );
+
     res.json({
       success: true,
       token,

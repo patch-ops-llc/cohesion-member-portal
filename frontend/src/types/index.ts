@@ -116,6 +116,22 @@ export const entityCategories: CategoryDefinition[] = [
   { key: 'previous_entity_tax_returns', label: 'Previous Entity Tax Returns' }
 ];
 
+// Notification preferences (user-facing)
+export interface UserNotificationPreferences {
+  passwordReset: boolean;
+  portalRegistration: boolean;
+  documentSubmission: boolean;
+  weeklyUpdate: boolean;
+}
+
+// Notification preferences (admin-facing)
+export interface AdminNotificationPreferences {
+  email: string;
+  adminRegistration: boolean;
+  adminDocumentSubmission: boolean;
+  adminWeeklyUpdate: boolean;
+}
+
 // Pizza tracker stages
 export const pipelineStages = [
   { id: 'collecting', label: 'Collecting Documents' },

@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import * as hubspot from '../services/hubspot';
 import * as storage from '../services/storage';
+import * as emailService from '../services/email';
 import { AppError } from '../middleware/errorHandler';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { validateFile, allowedMimeTypes, maxFileSize } from '../utils/validation';
@@ -144,6 +145,23 @@ router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (
       hubspotFileId,
       email: normalizedEmail
     });
+
+    // Send document submission emails (non-blocking)
+    const categoryData = documentData[categoryKey] as hubspot.CategoryData;
+    const categoryLabel = categoryData?.label || categoryKey;
+    const documentName = (!isNaN(docIndex) && categoryData?.documents?.[docIndex]?.name) || file.originalname;
+    const projectName = project.properties.client_project_name || 'Project';
+
+    const contact = await hubspot.findContactByEmail(normalizedEmail);
+    const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || normalizedEmail;
+
+    emailService.sendDocumentSubmissionEmail(
+      normalizedEmail, displayName, projectName, categoryLabel, documentName, file.originalname
+    ).catch(err => logger.error('Failed to send document submission email', { error: String(err) }));
+
+    emailService.sendAdminDocumentSubmissionNotification(
+      normalizedEmail, displayName, projectName, projectId, categoryLabel, documentName, file.originalname
+    ).catch(err => logger.error('Failed to send admin document submission notification', { error: String(err) }));
 
     res.json({
       success: true,

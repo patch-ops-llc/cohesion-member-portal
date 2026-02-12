@@ -4,6 +4,7 @@ import {
   LayoutDashboard, 
   FolderOpen, 
   FileText, 
+  Bell,
   LogOut, 
   Menu, 
   X,
@@ -18,7 +19,8 @@ interface AdminLayoutProps {
 const navItems = [
   { path: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true },
   { path: '/admin/projects', icon: FolderOpen, label: 'Projects' },
-  { path: '/admin/audit-log', icon: FileText, label: 'Audit Log' }
+  { path: '/admin/audit-log', icon: FileText, label: 'Audit Log' },
+  { path: '/admin/notifications', icon: Bell, label: 'Notifications' }
 ];
 
 export function AdminLayout({ children }: AdminLayoutProps) {
