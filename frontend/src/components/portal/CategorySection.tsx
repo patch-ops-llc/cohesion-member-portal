@@ -60,7 +60,7 @@ export function CategorySection({
   return (
     <div className={clsx(
       'card overflow-hidden transition-all',
-      !isActive && 'opacity-60'
+      !isActive && 'opacity-35'
     )}>
       {/* Header */}
       <div

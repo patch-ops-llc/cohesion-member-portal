@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { FolderOpen, ArrowRight, FileText, Folder, AlertCircle } from 'lucide-react';
 import { useProjects } from '../../hooks/useProjects';
+import { useAuth } from '../../hooks/useAuth';
 import { InlineLoader } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorBoundary';
 import { PizzaTrackerMini } from './PizzaTracker';
@@ -36,10 +37,10 @@ export function ProjectList() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-h-[60vh] flex flex-col">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Your Projects</h1>
       
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4 flex-1">
         {projects.map((project) => (
           <ProjectCard key={project.id} project={project} />
         ))}
@@ -49,9 +50,11 @@ export function ProjectList() {
 }
 
 function ProjectCard({ project }: { project: Project }) {
+  const { displayName } = useAuth();
   const stats = calculateStats(project.documentData);
   const categoryBreakdown = getCategoryBreakdown(project.documentData);
   const currentStageLabel = pipelineStages.find(s => s.id === project.stage)?.label ?? project.stage;
+  const contactLabel = displayName || project.email;
 
   return (
     <Link
@@ -70,7 +73,7 @@ function ProjectCard({ project }: { project: Project }) {
               <h3 className="font-semibold text-gray-900 group-hover:text-primary transition-colors truncate">
                 {project.name}
               </h3>
-              <p className="text-sm text-gray-500 truncate">{project.email}</p>
+              <p className="text-sm text-gray-500 truncate">{contactLabel}</p>
             </div>
           </div>
 

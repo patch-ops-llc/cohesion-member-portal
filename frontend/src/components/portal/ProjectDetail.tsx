@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Save, AlertCircle } from 'lucide-react';
 import { useProject, useUpdateDocumentData } from '../../hooks/useProjects';
+import { useAuth } from '../../hooks/useAuth';
 import { useDocumentData } from '../../hooks/useDocumentData';
 import { InlineLoader } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorBoundary';
@@ -10,6 +11,7 @@ import type { DocumentData, ModifiedFields } from '../../types';
 
 export function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>();
+  const { displayName } = useAuth();
   const { data, isLoading, error, refetch } = useProject(projectId);
   const updateMutation = useUpdateDocumentData(projectId || '');
 
@@ -47,7 +49,7 @@ export function ProjectDetail() {
       {/* Header */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">{data.project.name}</h1>
-        <p className="text-gray-600">{data.project.email}</p>
+        <p className="text-gray-600">{displayName || data.project.email}</p>
       </div>
 
       {/* Pizza Tracker */}
