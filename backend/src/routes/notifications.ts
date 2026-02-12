@@ -1,10 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import crypto from 'crypto';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { adminMiddleware } from '../middleware/admin';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import prisma from '../db/client';
+import * as emailService from '../services/email';
+import * as hubspot from '../services/hubspot';
 
 const router = Router();
 
@@ -276,6 +279,72 @@ router.patch('/cards/preferences/:email', async (req, res, next) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       next(new AppError('Invalid preferences', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// ─── Resend transactional emails from HubSpot card ────────────────────
+const PASSWORD_RESET_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
+
+// POST /api/notifications/cards/resend/:email - Resend a specific transactional email
+router.post('/cards/resend/:email', async (req, res, next) => {
+  try {
+    const email = decodeURIComponent(req.params.email).toLowerCase().trim();
+
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch {
+        return res.status(400).json({ success: false, error: 'Invalid JSON body' });
+      }
+    }
+
+    const { type } = z.object({ type: z.enum(['passwordReset', 'portalRegistration']) }).parse(body);
+
+    if (type === 'passwordReset') {
+      // Find user in DB
+      const user = await prisma.user.findUnique({ where: { email } });
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'No registered user found for this email.' });
+      }
+
+      // Invalidate existing unused tokens and create a fresh one
+      await prisma.passwordResetToken.updateMany({
+        where: { userId: user.id, usedAt: null },
+        data: { expiresAt: new Date() }
+      });
+
+      const token = crypto.randomBytes(32).toString('hex');
+      await prisma.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          token,
+          expiresAt: new Date(Date.now() + PASSWORD_RESET_EXPIRY_MS)
+        }
+      });
+
+      await emailService.sendPasswordResetEmail(email, token);
+      logger.info('Password reset email resent via HubSpot card', { email });
+
+      return res.json({ success: true, message: 'Password reset email sent.' });
+    }
+
+    if (type === 'portalRegistration') {
+      // Get display name from HubSpot contact
+      const contact = await hubspot.findContactByEmail(email);
+      const displayName = contact
+        ? [contact.firstName, contact.lastName].filter(Boolean).join(' ') || email
+        : email;
+
+      await emailService.sendRegistrationEmail(email, displayName);
+      logger.info('Registration email resent via HubSpot card', { email });
+
+      return res.json({ success: true, message: 'Registration email sent.' });
+    }
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid request: type must be passwordReset or portalRegistration', 400));
     } else {
       next(error);
     }

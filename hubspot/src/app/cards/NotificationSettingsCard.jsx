@@ -16,9 +16,14 @@ hubspot.extend(({ context }) => (
   <NotificationSettingsCard context={context} />
 ));
 
+// Resend-only types: these get a "Resend" button instead of ON/OFF toggle
+const resendTypes = [
+  { key: 'passwordReset', label: 'Password Reset', description: 'Send a password reset link to the client' },
+  { key: 'portalRegistration', label: 'Registration', description: 'Resend the welcome / registration email' }
+];
+
+// Toggleable notification types
 const userNotificationTypes = [
-  { key: 'passwordReset', label: 'Password Reset', description: 'Password reset emails' },
-  { key: 'portalRegistration', label: 'Registration', description: 'Welcome email on registration' },
   { key: 'documentSubmission', label: 'Document Submissions', description: 'Upload confirmation emails' },
   { key: 'weeklyUpdate', label: 'Weekly Updates', description: 'Weekly project summary' }
 ];
@@ -36,6 +41,7 @@ function NotificationSettingsCard({ context }) {
   const [preferences, setPreferences] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [resending, setResending] = useState(null); // key of the type currently resending
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState('');
   const [viewMode, setViewMode] = useState('client');
@@ -169,6 +175,36 @@ function NotificationSettingsCard({ context }) {
     }
   }, [email, saving, preferences]);
 
+  const handleResend = useCallback(async (type) => {
+    if (!email || resending) return;
+
+    setResending(type.key);
+    setError(null);
+
+    try {
+      const res = await hubspot.fetch(
+        `${BACKEND_URL}/api/notifications/cards/resend/${encodeURIComponent(email)}`,
+        {
+          method: 'POST',
+          body: { type: type.key }
+        }
+      );
+
+      const data = await res.json();
+
+      if (data.success) {
+        setSuccess(data.message || `${type.label} email sent`);
+        setTimeout(() => setSuccess(''), 3000);
+      } else {
+        setError(data.error || `Failed to send ${type.label} email`);
+      }
+    } catch (err) {
+      setError(err.message || `Failed to send ${type.label} email`);
+    } finally {
+      setResending(null);
+    }
+  }, [email, resending]);
+
   if (loading) {
     return (
       <Flex direction="column" gap="medium" align="center">
@@ -234,6 +270,28 @@ function NotificationSettingsCard({ context }) {
 
         <Divider distance="small" />
 
+        {/* Resend buttons (client view only) */}
+        {viewMode === 'client' && resendTypes.map((type) => (
+          <React.Fragment key={type.key}>
+            <Flex align="center" justify="between" gap="small">
+              <Flex direction="column" gap="flush">
+                <Text format={{ fontWeight: 'bold' }}>{type.label}</Text>
+                <Text variant="microcopy">{type.description}</Text>
+              </Flex>
+              <Button
+                variant="primary"
+                size="small"
+                onClick={() => handleResend(type)}
+                disabled={resending === type.key}
+              >
+                {resending === type.key ? 'Sending...' : 'Resend'}
+              </Button>
+            </Flex>
+            <Divider distance="flush" />
+          </React.Fragment>
+        ))}
+
+        {/* Toggleable notification preferences */}
         {currentTypes.map((type) => {
           const isEnabled = preferences?.[type.key] ?? true;
           return (

@@ -16,16 +16,17 @@ export function PizzaTracker({ currentStage }: PizzaTrackerProps) {
         Project Progress
       </h2>
       
-      <div className="flex items-center w-full gap-0">
+      <div className="flex items-start w-full">
         {pipelineStages.map((stage, index) => {
           const isCompleted = index < currentIndex;
           const isCurrent = index === currentIndex;
           const isPending = index > currentIndex;
+          const isLast = index === pipelineStages.length - 1;
 
           return (
-            <div key={stage.id} className="flex items-center flex-1 min-w-0">
+            <div key={stage.id} className={clsx('flex items-center min-w-0', !isLast && 'flex-1')}>
               {/* Step circle + label */}
-              <div className="flex flex-col items-center flex-shrink-0">
+              <div className="flex flex-col items-center flex-shrink-0 w-[80px]">
                 <div
                   className={clsx(
                     'w-11 h-11 rounded-full flex items-center justify-center font-semibold text-sm transition-all shadow-sm',
@@ -42,7 +43,7 @@ export function PizzaTracker({ currentStage }: PizzaTrackerProps) {
                 </div>
                 <span
                   className={clsx(
-                    'mt-2 text-xs font-medium text-center leading-tight max-w-[90px]',
+                    'mt-2 text-xs font-medium text-center leading-tight',
                     isCompleted && 'text-primary',
                     isCurrent && 'text-accent font-semibold',
                     isPending && 'text-gray-400'
@@ -53,10 +54,10 @@ export function PizzaTracker({ currentStage }: PizzaTrackerProps) {
               </div>
 
               {/* Connector line */}
-              {index < pipelineStages.length - 1 && (
+              {!isLast && (
                 <div
                   className={clsx(
-                    'flex-1 h-1 mx-1 min-w-[12px] rounded-full',
+                    'flex-1 h-1 rounded-full mt-[18px]',
                     index < currentIndex ? 'bg-primary' : 'bg-gray-200'
                   )}
                 />
