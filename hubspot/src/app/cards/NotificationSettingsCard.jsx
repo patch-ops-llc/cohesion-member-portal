@@ -186,11 +186,18 @@ function NotificationSettingsCard({ context }) {
         `${BACKEND_URL}/api/notifications/cards/resend/${encodeURIComponent(email)}`,
         {
           method: 'POST',
-          body: { type: type.key }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: type.key })
         }
       );
 
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (_parseErr) {
+        setError(`Server returned an invalid response (HTTP ${res.status}). Please try again.`);
+        return;
+      }
 
       if (data.success) {
         setSuccess(data.message || `${type.label} email sent`);

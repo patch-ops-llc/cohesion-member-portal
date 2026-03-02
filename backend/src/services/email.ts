@@ -203,6 +203,44 @@ export async function sendAdminRegistrationNotification(userEmail: string, displ
   await sendEmail(recipients, 'New Portal Registration - ' + (displayName || userEmail), html);
 }
 
+// ─── REGISTRATION INVITE (admin-triggered) ──────────────────────────────
+export async function sendRegistrationInviteEmail(email: string, displayName: string): Promise<void> {
+  const html = wrapHtml(`
+    <p>Hi ${displayName || 'there'},</p>
+    <p>You've been invited to join the <strong>Cohesion Document Portal</strong>.</p>
+    <p>This portal allows you to securely upload and track your tax documents. Getting started takes less than a minute — just set a password and you're in.</p>
+    <p style="text-align: center;">
+      <a href="${frontendUrl}/login" class="btn">Set Up Your Account</a>
+    </p>
+    <p style="font-size: 13px; color: #666;">
+      When you click the button, enter your email (<strong>${email}</strong>) and you'll be prompted to create a password.
+    </p>
+    <p style="font-size: 13px; color: #999;">If you've already registered, you can simply log in at the link above.</p>
+  `);
+
+  await sendEmail(email, 'You\'re Invited to the Cohesion Document Portal', html);
+}
+
+// ─── ADMIN-TRIGGERED PASSWORD RESET ─────────────────────────────────────
+export async function sendAdminPasswordResetEmail(email: string, resetToken: string, displayName: string): Promise<void> {
+  const resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
+
+  const html = wrapHtml(`
+    <p>Hi ${displayName || 'there'},</p>
+    <p>A password reset has been initiated for your Cohesion Portal account by our team.</p>
+    <p>Click the button below to set a new password:</p>
+    <p style="text-align: center;">
+      <a href="${resetUrl}" class="btn">Reset Password</a>
+    </p>
+    <p style="font-size: 13px; color: #666;">
+      Or copy this link: <a href="${resetUrl}" style="color: #1e3a5f;">${resetUrl}</a>
+    </p>
+    <p style="font-size: 13px; color: #999;">This link expires in 1 hour. If you didn't expect this, you can safely ignore this email.</p>
+  `);
+
+  await sendEmail(email, 'Password Reset - Cohesion Portal', html);
+}
+
 // ─── DOCUMENT SUBMISSION (user) ────────────────────────────────────────
 export async function sendDocumentSubmissionEmail(
   email: string,

@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import crypto from 'crypto';
 import * as hubspot from '../services/hubspot';
+import * as emailService from '../services/email';
 import { adminMiddleware } from '../middleware/admin';
 import { AppError } from '../middleware/errorHandler';
 import { documentStatusSchema } from '../utils/validation';
 import { logger } from '../utils/logger';
 import prisma from '../db/client';
+
+const PASSWORD_RESET_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
 
 const router = Router();
 
@@ -281,6 +285,329 @@ router.get('/stats', async (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+});
+
+// GET /api/admin/contacts - List all HubSpot contacts
+router.get('/contacts', async (req, res, next) => {
+  try {
+    const { search, limit = '100' } = req.query;
+    const limitNum = Math.min(parseInt(limit as string), 200);
+
+    const result = await hubspot.getAllContacts(limitNum);
+
+    let contacts = result.contacts;
+
+    // Apply search filter if provided
+    if (search && typeof search === 'string') {
+      const searchLower = search.toLowerCase();
+      contacts = contacts.filter(c =>
+        c.email?.toLowerCase().includes(searchLower) ||
+        c.firstName?.toLowerCase().includes(searchLower) ||
+        c.lastName?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Check registration status for each contact
+    const contactsWithStatus = await Promise.all(
+      contacts.map(async (contact) => {
+        const user = await prisma.user.findUnique({
+          where: { email: contact.email.toLowerCase().trim() }
+        });
+        return {
+          ...contact,
+          isRegistered: !!user,
+          lastLoginAt: user?.lastLoginAt?.toISOString() || null
+        };
+      })
+    );
+
+    logger.info('Admin contacts fetched', { count: contactsWithStatus.length });
+
+    res.json({
+      success: true,
+      contacts: contactsWithStatus,
+      total: contactsWithStatus.length,
+      hasMore: !!result.paging?.next?.after
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/admin/send-registration-invites - Send invite emails to selected project emails
+router.post('/send-registration-invites', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      projectIds: z.array(z.string()).min(1, 'At least one project must be selected')
+    });
+    const { projectIds } = schema.parse(req.body);
+
+    const results: { email: string; status: 'sent' | 'already_registered' | 'no_email' | 'error'; error?: string }[] = [];
+
+    for (const projectId of projectIds) {
+      try {
+        const project = await hubspot.getProject(projectId);
+        const email = project.properties.email?.toLowerCase().trim();
+
+        if (!email) {
+          results.push({ email: projectId, status: 'no_email' });
+          continue;
+        }
+
+        // Check if already registered
+        const existingUser = await prisma.user.findUnique({ where: { email } });
+        if (existingUser) {
+          results.push({ email, status: 'already_registered' });
+          continue;
+        }
+
+        // Get contact name for personalization
+        const contact = await hubspot.findContactByEmail(email);
+        const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '';
+
+        await emailService.sendRegistrationInviteEmail(email, displayName);
+        results.push({ email, status: 'sent' });
+
+        logger.info('Registration invite sent', { email, projectId });
+      } catch (err) {
+        results.push({
+          email: projectId,
+          status: 'error',
+          error: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
+
+    // Audit log
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_send_registration_invites',
+        entityType: 'bulk',
+        entityId: 'registration_invites',
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { projectIds, results },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    const sentCount = results.filter(r => r.status === 'sent').length;
+    logger.info('Bulk registration invites completed', { total: projectIds.length, sent: sentCount });
+
+    res.json({
+      success: true,
+      results,
+      summary: {
+        total: results.length,
+        sent: sentCount,
+        alreadyRegistered: results.filter(r => r.status === 'already_registered').length,
+        noEmail: results.filter(r => r.status === 'no_email').length,
+        errors: results.filter(r => r.status === 'error').length
+      }
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError(error.errors[0]?.message || 'Invalid request', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// POST /api/admin/send-bulk-contact-invites - Bulk send registration invites by email
+router.post('/send-bulk-contact-invites', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      emails: z.array(z.string().email()).min(1, 'At least one email must be selected')
+    });
+    const { emails } = schema.parse(req.body);
+
+    const results: { email: string; status: 'sent' | 'already_registered' | 'error'; error?: string }[] = [];
+
+    for (const rawEmail of emails) {
+      const normalizedEmail = rawEmail.toLowerCase().trim();
+      try {
+        const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+        if (existingUser) {
+          results.push({ email: normalizedEmail, status: 'already_registered' });
+          continue;
+        }
+
+        const contact = await hubspot.findContactByEmail(normalizedEmail);
+        const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '';
+
+        await emailService.sendRegistrationInviteEmail(normalizedEmail, displayName);
+        results.push({ email: normalizedEmail, status: 'sent' });
+
+        logger.info('Bulk contact registration invite sent', { email: normalizedEmail });
+      } catch (err) {
+        results.push({
+          email: normalizedEmail,
+          status: 'error',
+          error: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_send_bulk_contact_invites',
+        entityType: 'bulk',
+        entityId: 'contact_invites',
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { emails, results },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    const sentCount = results.filter(r => r.status === 'sent').length;
+    logger.info('Bulk contact registration invites completed', { total: emails.length, sent: sentCount });
+
+    res.json({
+      success: true,
+      results,
+      summary: {
+        total: results.length,
+        sent: sentCount,
+        alreadyRegistered: results.filter(r => r.status === 'already_registered').length,
+        errors: results.filter(r => r.status === 'error').length
+      }
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError(error.errors[0]?.message || 'Invalid request', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// POST /api/admin/send-contact-invite - Send registration invite to a single contact by email
+router.post('/send-contact-invite', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      email: z.string().email()
+    });
+    const { email } = schema.parse(req.body);
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Check if already registered
+    const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'User is already registered.'
+      });
+    }
+
+    // Get contact name for personalization
+    const contact = await hubspot.findContactByEmail(normalizedEmail);
+    const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '';
+
+    await emailService.sendRegistrationInviteEmail(normalizedEmail, displayName);
+
+    // Audit log
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_send_contact_invite',
+        entityType: 'contact',
+        entityId: contact?.id || normalizedEmail,
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { targetEmail: normalizedEmail },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Contact registration invite sent', { email: normalizedEmail });
+
+    res.json({
+      success: true,
+      message: `Registration invite sent to ${normalizedEmail}`
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid email address', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// POST /api/admin/send-password-reset - Admin-triggered password reset for a contact
+router.post('/send-password-reset', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      email: z.string().email()
+    });
+    const { email } = schema.parse(req.body);
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Find user in local DB
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: 'User has not registered yet. Send a registration invite instead.'
+      });
+    }
+
+    // Check for existing valid token
+    const existingToken = await prisma.passwordResetToken.findFirst({
+      where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } }
+    });
+
+    let token: string;
+    if (existingToken) {
+      token = existingToken.token;
+    } else {
+      token = crypto.randomBytes(32).toString('hex');
+      await prisma.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          token,
+          expiresAt: new Date(Date.now() + PASSWORD_RESET_EXPIRY_MS)
+        }
+      });
+    }
+
+    // Get contact name for personalization
+    const contact = await hubspot.findContactByEmail(normalizedEmail);
+    const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '';
+
+    await emailService.sendAdminPasswordResetEmail(normalizedEmail, token, displayName);
+
+    // Audit log
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_send_password_reset',
+        entityType: 'user',
+        entityId: user.id,
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { targetEmail: normalizedEmail },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin-triggered password reset sent', { email: normalizedEmail });
+
+    res.json({
+      success: true,
+      message: `Password reset email sent to ${normalizedEmail}`
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid email address', 400));
+    } else {
+      next(error);
+    }
   }
 });
 

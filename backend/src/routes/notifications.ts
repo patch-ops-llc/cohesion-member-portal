@@ -289,7 +289,7 @@ router.patch('/cards/preferences/:email', async (req, res, next) => {
 const PASSWORD_RESET_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
 
 // POST /api/notifications/cards/resend/:email - Resend a specific transactional email
-router.post('/cards/resend/:email', async (req, res, next) => {
+router.post('/cards/resend/:email', async (req, res, _next) => {
   try {
     const email = decodeURIComponent(req.params.email).toLowerCase().trim();
 
@@ -299,55 +299,90 @@ router.post('/cards/resend/:email', async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Invalid JSON body' });
       }
     }
+    // hubspot.fetch may send body without Content-Type header; handle undefined
+    if (!body || (typeof body === 'object' && Object.keys(body).length === 0)) {
+      return res.status(400).json({ success: false, error: 'Missing request body. Expected { type: "passwordReset" | "portalRegistration" }' });
+    }
 
-    const { type } = z.object({ type: z.enum(['passwordReset', 'portalRegistration']) }).parse(body);
+    let type: 'passwordReset' | 'portalRegistration';
+    try {
+      ({ type } = z.object({ type: z.enum(['passwordReset', 'portalRegistration']) }).parse(body));
+    } catch {
+      return res.status(400).json({ success: false, error: 'Invalid request: type must be "passwordReset" or "portalRegistration"' });
+    }
 
     if (type === 'passwordReset') {
       // Find user in DB
       const user = await prisma.user.findUnique({ where: { email } });
       if (!user) {
-        return res.status(404).json({ success: false, error: 'No registered user found for this email.' });
+        return res.status(404).json({ success: false, error: 'No registered user found for this email. The client must register before a password reset can be sent.' });
       }
 
       // Invalidate existing unused tokens and create a fresh one
-      await prisma.passwordResetToken.updateMany({
-        where: { userId: user.id, usedAt: null },
-        data: { expiresAt: new Date() }
-      });
+      try {
+        await prisma.passwordResetToken.updateMany({
+          where: { userId: user.id, usedAt: null },
+          data: { expiresAt: new Date() }
+        });
+      } catch (dbErr) {
+        logger.error('Failed to invalidate existing password reset tokens', { email, error: String(dbErr) });
+        // Non-critical — continue to create a new token
+      }
 
       const token = crypto.randomBytes(32).toString('hex');
-      await prisma.passwordResetToken.create({
-        data: {
-          userId: user.id,
-          token,
-          expiresAt: new Date(Date.now() + PASSWORD_RESET_EXPIRY_MS)
-        }
-      });
+      try {
+        await prisma.passwordResetToken.create({
+          data: {
+            userId: user.id,
+            token,
+            expiresAt: new Date(Date.now() + PASSWORD_RESET_EXPIRY_MS)
+          }
+        });
+      } catch (dbErr) {
+        logger.error('Failed to create password reset token', { email, error: String(dbErr) });
+        return res.status(500).json({ success: false, error: 'Failed to create password reset token. Please try again.' });
+      }
 
-      await emailService.sendPasswordResetEmail(email, token);
+      try {
+        await emailService.sendPasswordResetEmail(email, token);
+      } catch (emailErr) {
+        logger.error('Failed to send password reset email', { email, error: String(emailErr) });
+        return res.status(500).json({ success: false, error: 'Failed to send password reset email. Please check email service configuration.' });
+      }
+
       logger.info('Password reset email resent via HubSpot card', { email });
-
       return res.json({ success: true, message: 'Password reset email sent.' });
     }
 
     if (type === 'portalRegistration') {
       // Get display name from HubSpot contact
-      const contact = await hubspot.findContactByEmail(email);
-      const displayName = contact
-        ? [contact.firstName, contact.lastName].filter(Boolean).join(' ') || email
-        : email;
+      let displayName = email;
+      try {
+        const contact = await hubspot.findContactByEmail(email);
+        if (contact) {
+          displayName = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || email;
+        }
+      } catch (hsErr) {
+        logger.warn('Could not fetch contact name from HubSpot, using email as display name', { email, error: String(hsErr) });
+        // Non-critical — fall through with email as display name
+      }
 
-      await emailService.sendRegistrationEmail(email, displayName);
+      try {
+        await emailService.sendRegistrationEmail(email, displayName);
+      } catch (emailErr) {
+        logger.error('Failed to send registration email', { email, error: String(emailErr) });
+        return res.status(500).json({ success: false, error: 'Failed to send registration email. Please check email service configuration.' });
+      }
+
       logger.info('Registration email resent via HubSpot card', { email });
-
       return res.json({ success: true, message: 'Registration email sent.' });
     }
+
+    // Should not reach here, but just in case
+    return res.status(400).json({ success: false, error: 'Invalid type' });
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      next(new AppError('Invalid request: type must be passwordReset or portalRegistration', 400));
-    } else {
-      next(error);
-    }
+    logger.error('Unexpected error in resend endpoint', { error: String(error), stack: (error as Error)?.stack });
+    return res.status(500).json({ success: false, error: 'Failed to send email. Please try again or check server logs.' });
   }
 });
 

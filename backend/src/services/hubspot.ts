@@ -262,6 +262,8 @@ export interface ContactInfo {
   email: string;
   firstName?: string;
   lastName?: string;
+  createDate?: string;
+  lastModifiedDate?: string;
 }
 
 // Search for contact by email (validates user is in HubSpot CRM)
@@ -321,6 +323,37 @@ export async function validateEmailInHubSpot(email: string): Promise<boolean> {
   // Check 2: Has projects in p_client_projects (fallback for clients not yet as contacts)
   const projects = await getProjectsByEmail(normalizedEmail);
   return projects.length > 0;
+}
+
+// Get all contacts (for admin)
+export async function getAllContacts(limit: number = 100, after?: string): Promise<{
+  contacts: ContactInfo[];
+  paging?: { next?: { after: string } };
+}> {
+  try {
+    const response = await hubspotClient.crm.contacts.basicApi.getPage(
+      limit,
+      after,
+      ['email', 'firstname', 'lastname', 'hs_object_id', 'createdate', 'lastmodifieddate']
+    );
+
+    return {
+      contacts: response.results
+        .filter(c => c.properties.email) // skip contacts without email
+        .map(c => ({
+          id: c.id,
+          email: c.properties.email!,
+          firstName: c.properties.firstname?.trim() || undefined,
+          lastName: c.properties.lastname?.trim() || undefined,
+          createDate: c.properties.createdate || undefined,
+          lastModifiedDate: c.properties.lastmodifieddate || undefined,
+        })),
+      paging: response.paging
+    };
+  } catch (error) {
+    logger.error('Failed to get all contacts', { error: String(error) });
+    throw error;
+  }
 }
 
 // Parse document_data safely
