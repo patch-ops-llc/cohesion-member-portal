@@ -1,6 +1,7 @@
 import { Resend } from 'resend';
 import { logger } from '../utils/logger';
 import prisma from '../db/client';
+import { DEFAULT_TEMPLATES } from './emailTemplateDefaults';
 
 let resendInstance: Resend | null = null;
 function getResend(): Resend | null {
@@ -15,6 +16,46 @@ const fromEmail = process.env.FROM_EMAIL || 'noreply@example.com';
 const fromName = process.env.FROM_NAME || 'Cohesion Portal';
 const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 const adminEmails = (process.env.ADMIN_NOTIFICATION_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
+
+// ─── Template loader ──────────────────────────────────────────────────
+interface LoadedTemplate {
+  senderName: string;
+  senderEmail: string;
+  subject: string;
+  body: string;
+}
+
+async function loadTemplate(key: string): Promise<LoadedTemplate> {
+  try {
+    const dbTemplate = await prisma.emailTemplate.findUnique({ where: { key } });
+    if (dbTemplate) {
+      return {
+        senderName: dbTemplate.senderName,
+        senderEmail: dbTemplate.senderEmail,
+        subject: dbTemplate.subject,
+        body: dbTemplate.body
+      };
+    }
+  } catch (err) {
+    logger.warn('Failed to load email template from DB, using default', { key, error: String(err) });
+  }
+
+  const def = DEFAULT_TEMPLATES.find(d => d.key === key);
+  if (def) {
+    return {
+      senderName: def.senderName,
+      senderEmail: def.senderEmail,
+      subject: def.subject,
+      body: def.body
+    };
+  }
+
+  return { senderName: fromName, senderEmail: fromEmail, subject: '', body: '' };
+}
+
+function interpolate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, varName) => vars[varName] ?? '');
+}
 
 // ─── Shared HTML wrapper ───────────────────────────────────────────────
 function wrapHtml(body: string): string {
@@ -66,7 +107,7 @@ function wrapHtml(body: string): string {
 async function shouldSendToUser(email: string, type: string): Promise<boolean> {
   try {
     const prefs = await prisma.notificationPreference.findUnique({ where: { email: email.toLowerCase().trim() } });
-    if (!prefs) return true; // default all on
+    if (!prefs) return true;
     switch (type) {
       case 'password_reset': return prefs.passwordReset;
       case 'portal_registration': return prefs.portalRegistration;
@@ -85,7 +126,7 @@ async function getAdminRecipientsFor(type: string): Promise<string[]> {
   for (const email of adminEmails) {
     try {
       const prefs = await prisma.notificationPreference.findUnique({ where: { email: email.toLowerCase().trim() } });
-      if (!prefs) { recipients.push(email); continue; } // default all on
+      if (!prefs) { recipients.push(email); continue; }
       switch (type) {
         case 'admin_registration': if (prefs.adminRegistration) recipients.push(email); break;
         case 'admin_document_submission': if (prefs.adminDocumentSubmission) recipients.push(email); break;
@@ -100,9 +141,12 @@ async function getAdminRecipientsFor(type: string): Promise<string[]> {
 }
 
 // ─── Core send function ────────────────────────────────────────────────
-async function sendEmail(to: string | string[], subject: string, html: string): Promise<void> {
+async function sendEmail(to: string | string[], subject: string, html: string, senderName?: string, senderEmail?: string): Promise<void> {
   const recipients = Array.isArray(to) ? to : [to];
   if (recipients.length === 0) return;
+
+  const name = senderName || fromName;
+  const email = senderEmail || fromEmail;
 
   try {
     const resend = getResend();
@@ -112,7 +156,7 @@ async function sendEmail(to: string | string[], subject: string, html: string): 
     }
 
     const { data, error } = await resend.emails.send({
-      from: `${fromName} <${fromEmail}>`,
+      from: `${name} <${email}>`,
       to: recipients,
       subject,
       html
@@ -139,21 +183,12 @@ export async function sendPasswordResetEmail(email: string, resetToken: string):
   }
 
   const resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
+  const tpl = await loadTemplate('passwordReset');
+  const vars = { resetUrl };
+  const subject = interpolate(tpl.subject, vars);
+  const body = interpolate(tpl.body, vars);
 
-  const html = wrapHtml(`
-    <p>Hi there,</p>
-    <p>You requested a password reset for your Cohesion Portal account.</p>
-    <p>Click the button below to set a new password:</p>
-    <p style="text-align: center;">
-      <a href="${resetUrl}" class="btn">Reset Password</a>
-    </p>
-    <p style="font-size: 13px; color: #666;">
-      Or copy this link: <a href="${resetUrl}" style="color: #1e3a5f;">${resetUrl}</a>
-    </p>
-    <p style="font-size: 13px; color: #999;">This link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>
-  `);
-
-  await sendEmail(email, 'Reset your password - Cohesion Portal', html);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }
 
 // ─── PORTAL REGISTRATION (user) ───────────────────────────────────────
@@ -161,17 +196,12 @@ export async function sendRegistrationEmail(email: string, displayName: string):
   const allowed = await shouldSendToUser(email, 'portal_registration');
   if (!allowed) return;
 
-  const html = wrapHtml(`
-    <p>Hi ${displayName || 'there'},</p>
-    <p>Welcome to the Cohesion Document Portal! Your account has been created successfully.</p>
-    <p>You can now log in to view your projects, upload documents, and track your tax return progress.</p>
-    <p style="text-align: center;">
-      <a href="${frontendUrl}/login" class="btn">Go to Portal</a>
-    </p>
-    <p style="font-size: 13px; color: #666;">If you didn't create this account, please contact our team.</p>
-  `);
+  const tpl = await loadTemplate('portalRegistration');
+  const vars = { displayName: displayName || 'there', loginUrl: `${frontendUrl}/login` };
+  const subject = interpolate(tpl.subject, vars);
+  const body = interpolate(tpl.body, vars);
 
-  await sendEmail(email, 'Welcome to Cohesion Portal', html);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }
 
 // ─── PORTAL REGISTRATION (admin) ──────────────────────────────────────
@@ -179,66 +209,42 @@ export async function sendAdminRegistrationNotification(userEmail: string, displ
   const recipients = await getAdminRecipientsFor('admin_registration');
   if (recipients.length === 0) return;
 
-  const html = wrapHtml(`
-    <p>A new client has registered on the Cohesion Portal:</p>
-    <table>
-      <tr>
-        <td class="detail-label">Name</td>
-        <td>${displayName || 'N/A'}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">Email</td>
-        <td>${userEmail}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">Time</td>
-        <td>${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })}</td>
-      </tr>
-    </table>
-    <p style="text-align: center; margin-top: 24px;">
-      <a href="${frontendUrl}/admin/projects" class="btn">View in Admin Portal</a>
-    </p>
-  `);
+  const tpl = await loadTemplate('adminRegistration');
+  const vars = {
+    displayName: displayName || 'N/A',
+    userEmail,
+    time: new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }),
+    adminUrl: `${frontendUrl}/admin/projects`
+  };
+  const subject = interpolate(tpl.subject, vars);
+  const body = interpolate(tpl.body, vars);
 
-  await sendEmail(recipients, 'New Portal Registration - ' + (displayName || userEmail), html);
+  await sendEmail(recipients, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }
 
 // ─── REGISTRATION INVITE (admin-triggered) ──────────────────────────────
 export async function sendRegistrationInviteEmail(email: string, displayName: string): Promise<void> {
-  const html = wrapHtml(`
-    <p>Hi ${displayName || 'there'},</p>
-    <p>You've been invited to join the <strong>Cohesion Document Portal</strong>.</p>
-    <p>This portal allows you to securely upload and track your tax documents. Getting started takes less than a minute — just set a password and you're in.</p>
-    <p style="text-align: center;">
-      <a href="${frontendUrl}/login" class="btn">Set Up Your Account</a>
-    </p>
-    <p style="font-size: 13px; color: #666;">
-      When you click the button, enter your email (<strong>${email}</strong>) and you'll be prompted to create a password.
-    </p>
-    <p style="font-size: 13px; color: #999;">If you've already registered, you can simply log in at the link above.</p>
-  `);
+  const tpl = await loadTemplate('registrationInvite');
+  const vars = {
+    displayName: displayName || 'there',
+    email,
+    loginUrl: `${frontendUrl}/login`
+  };
+  const subject = interpolate(tpl.subject, vars);
+  const body = interpolate(tpl.body, vars);
 
-  await sendEmail(email, 'You\'re Invited to the Cohesion Document Portal', html);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }
 
 // ─── ADMIN-TRIGGERED PASSWORD RESET ─────────────────────────────────────
 export async function sendAdminPasswordResetEmail(email: string, resetToken: string, displayName: string): Promise<void> {
   const resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
+  const tpl = await loadTemplate('adminPasswordReset');
+  const vars = { displayName: displayName || 'there', resetUrl };
+  const subject = interpolate(tpl.subject, vars);
+  const body = interpolate(tpl.body, vars);
 
-  const html = wrapHtml(`
-    <p>Hi ${displayName || 'there'},</p>
-    <p>A password reset has been initiated for your Cohesion Portal account by our team.</p>
-    <p>Click the button below to set a new password:</p>
-    <p style="text-align: center;">
-      <a href="${resetUrl}" class="btn">Reset Password</a>
-    </p>
-    <p style="font-size: 13px; color: #666;">
-      Or copy this link: <a href="${resetUrl}" style="color: #1e3a5f;">${resetUrl}</a>
-    </p>
-    <p style="font-size: 13px; color: #999;">This link expires in 1 hour. If you didn't expect this, you can safely ignore this email.</p>
-  `);
-
-  await sendEmail(email, 'Password Reset - Cohesion Portal', html);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }
 
 // ─── DOCUMENT SUBMISSION (user) ────────────────────────────────────────
@@ -253,38 +259,19 @@ export async function sendDocumentSubmissionEmail(
   const allowed = await shouldSendToUser(email, 'document_submission');
   if (!allowed) return;
 
-  const html = wrapHtml(`
-    <p>Hi ${displayName || 'there'},</p>
-    <p>Your document has been submitted successfully!</p>
-    <table>
-      <tr>
-        <td class="detail-label">Project</td>
-        <td>${projectName}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">Category</td>
-        <td>${categoryLabel}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">Document</td>
-        <td>${documentName}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">File</td>
-        <td>${filename}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">Status</td>
-        <td><span class="status-badge status-pending">Pending Review</span></td>
-      </tr>
-    </table>
-    <p>Our team will review your submission shortly. You'll be notified once it's processed.</p>
-    <p style="text-align: center;">
-      <a href="${frontendUrl}" class="btn">View Your Projects</a>
-    </p>
-  `);
+  const tpl = await loadTemplate('documentSubmission');
+  const vars = {
+    displayName: displayName || 'there',
+    projectName,
+    categoryLabel,
+    documentName,
+    filename,
+    portalUrl: frontendUrl
+  };
+  const subject = interpolate(tpl.subject, vars);
+  const body = interpolate(tpl.body, vars);
 
-  await sendEmail(email, `Document Submitted: ${documentName} - ${projectName}`, html);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }
 
 // ─── DOCUMENT SUBMISSION (admin) ───────────────────────────────────────
@@ -300,40 +287,21 @@ export async function sendAdminDocumentSubmissionNotification(
   const recipients = await getAdminRecipientsFor('admin_document_submission');
   if (recipients.length === 0) return;
 
-  const html = wrapHtml(`
-    <p>A client has submitted a document:</p>
-    <table>
-      <tr>
-        <td class="detail-label">Client</td>
-        <td>${displayName || userEmail}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">Project</td>
-        <td>${projectName}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">Category</td>
-        <td>${categoryLabel}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">Document</td>
-        <td>${documentName}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">File</td>
-        <td>${filename}</td>
-      </tr>
-      <tr>
-        <td class="detail-label">Time</td>
-        <td>${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })}</td>
-      </tr>
-    </table>
-    <p style="text-align: center; margin-top: 24px;">
-      <a href="${frontendUrl}/admin/projects/${projectId}" class="btn">Review in Admin</a>
-    </p>
-  `);
+  const tpl = await loadTemplate('adminDocumentSubmission');
+  const vars = {
+    displayName: displayName || userEmail,
+    userEmail,
+    projectName,
+    categoryLabel,
+    documentName,
+    filename,
+    time: new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }),
+    adminUrl: `${frontendUrl}/admin/projects/${projectId}`
+  };
+  const subject = interpolate(tpl.subject, vars);
+  const body = interpolate(tpl.body, vars);
 
-  await sendEmail(recipients, `Document Submitted by ${displayName || userEmail} - ${projectName}`, html);
+  await sendEmail(recipients, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }
 
 // ─── WEEKLY UPDATE (user) ──────────────────────────────────────────────
@@ -364,27 +332,7 @@ export async function sendWeeklyUpdateEmail(
     }
   };
 
-  const projectRows = projects.map(p => `
-    <tr>
-      <td style="padding: 12px; border-bottom: 1px solid #eee;">
-        <strong>${p.projectName}</strong><br/>
-        <span style="font-size: 12px; color: #666;">${stageLabel(p.stage)}</span>
-      </td>
-      <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">${p.totalDocs}</td>
-      <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">
-        <span class="status-badge status-accepted">${p.acceptedDocs}</span>
-      </td>
-      <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">
-        <span class="status-badge status-pending">${p.pendingDocs}</span>
-      </td>
-      <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">${p.actionNeeded}</td>
-    </tr>
-  `).join('');
-
-  const html = wrapHtml(`
-    <p>Hi ${displayName || 'there'},</p>
-    <p>Here's your weekly update on your Cohesion Document Portal projects:</p>
-    <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+  const projectRowsHtml = `<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
       <tr style="background: #f8f9fa;">
         <th style="padding: 10px 12px; text-align: left; font-size: 13px;">Project</th>
         <th style="padding: 10px 12px; text-align: center; font-size: 13px;">Total</th>
@@ -392,15 +340,34 @@ export async function sendWeeklyUpdateEmail(
         <th style="padding: 10px 12px; text-align: center; font-size: 13px;">Pending</th>
         <th style="padding: 10px 12px; text-align: center; font-size: 13px;">Action</th>
       </tr>
-      ${projectRows}
-    </table>
-    <p style="text-align: center;">
-      <a href="${frontendUrl}" class="btn">View Your Projects</a>
-    </p>
-    <p style="font-size: 12px; color: #999;">You can manage your notification preferences in the portal settings.</p>
-  `);
+      ${projects.map(p => `
+      <tr>
+        <td style="padding: 12px; border-bottom: 1px solid #eee;">
+          <strong>${p.projectName}</strong><br/>
+          <span style="font-size: 12px; color: #666;">${stageLabel(p.stage)}</span>
+        </td>
+        <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">${p.totalDocs}</td>
+        <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">
+          <span class="status-badge status-accepted">${p.acceptedDocs}</span>
+        </td>
+        <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">
+          <span class="status-badge status-pending">${p.pendingDocs}</span>
+        </td>
+        <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">${p.actionNeeded}</td>
+      </tr>
+      `).join('')}
+    </table>`;
 
-  await sendEmail(email, 'Your Weekly Cohesion Portal Update', html);
+  const tpl = await loadTemplate('weeklyUpdate');
+  const vars = {
+    displayName: displayName || 'there',
+    projectRows: projectRowsHtml,
+    portalUrl: frontendUrl
+  };
+  const subject = interpolate(tpl.subject, vars);
+  const body = interpolate(tpl.body, vars);
+
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }
 
 // ─── WEEKLY UPDATE (admin) ─────────────────────────────────────────────
@@ -417,38 +384,18 @@ export async function sendAdminWeeklyUpdateEmail(summary: AdminWeeklySummary): P
   const recipients = await getAdminRecipientsFor('admin_weekly_update');
   if (recipients.length === 0) return;
 
-  const html = wrapHtml(`
-    <p>Here's your weekly Cohesion Portal admin summary:</p>
-    <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
-      <tr style="background: #f8f9fa;">
-        <td style="padding: 12px; font-weight: 600;">Total Projects</td>
-        <td style="padding: 12px; text-align: right; font-size: 20px; font-weight: 700;">${summary.totalProjects}</td>
-      </tr>
-      <tr>
-        <td style="padding: 12px; font-weight: 600;">Active Projects</td>
-        <td style="padding: 12px; text-align: right; font-size: 20px; font-weight: 700;">${summary.activeProjects}</td>
-      </tr>
-      <tr style="background: #f8f9fa;">
-        <td style="padding: 12px; font-weight: 600;">Pending Review</td>
-        <td style="padding: 12px; text-align: right; font-size: 20px; font-weight: 700; color: #856404;">${summary.totalPending}</td>
-      </tr>
-      <tr>
-        <td style="padding: 12px; font-weight: 600;">Accepted</td>
-        <td style="padding: 12px; text-align: right; font-size: 20px; font-weight: 700; color: #155724;">${summary.totalAccepted}</td>
-      </tr>
-      <tr style="background: #f8f9fa;">
-        <td style="padding: 12px; font-weight: 600;">New Registrations (7d)</td>
-        <td style="padding: 12px; text-align: right; font-size: 20px; font-weight: 700;">${summary.newRegistrations}</td>
-      </tr>
-      <tr>
-        <td style="padding: 12px; font-weight: 600;">New Uploads (7d)</td>
-        <td style="padding: 12px; text-align: right; font-size: 20px; font-weight: 700;">${summary.newUploads}</td>
-      </tr>
-    </table>
-    <p style="text-align: center;">
-      <a href="${frontendUrl}/admin" class="btn">Open Admin Dashboard</a>
-    </p>
-  `);
+  const tpl = await loadTemplate('adminWeeklyUpdate');
+  const vars = {
+    totalProjects: String(summary.totalProjects),
+    activeProjects: String(summary.activeProjects),
+    totalPending: String(summary.totalPending),
+    totalAccepted: String(summary.totalAccepted),
+    newRegistrations: String(summary.newRegistrations),
+    newUploads: String(summary.newUploads),
+    adminUrl: `${frontendUrl}/admin`
+  };
+  const subject = interpolate(tpl.subject, vars);
+  const body = interpolate(tpl.body, vars);
 
-  await sendEmail(recipients, 'Weekly Cohesion Portal Admin Summary', html);
+  await sendEmail(recipients, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }

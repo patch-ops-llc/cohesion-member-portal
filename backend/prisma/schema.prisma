@@ -83,6 +83,22 @@ model NotificationPreference {
   @@map("notification_preferences")
 }
 
+// Email templates - customisable sender, subject and body per email type
+model EmailTemplate {
+  id         String   @id @default(uuid())
+  key        String   @unique
+  label      String
+  senderName String   @map("sender_name")
+  senderEmail String  @map("sender_email")
+  subject    String
+  body       String   @db.Text
+  variables  String[] @default([])
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("email_templates")
+}
+
 // Audit log for tracking changes
 model AuditLog {
   id         String   @id @default(uuid())

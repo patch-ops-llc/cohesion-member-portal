@@ -8,6 +8,8 @@ import {
   Alert,
   LoadingSpinner,
   ToggleGroup,
+  Input,
+  TextArea,
   hubspot
 } from '@hubspot/ui-extensions';
 import { BACKEND_URL } from '../config';
@@ -16,13 +18,11 @@ hubspot.extend(({ context }) => (
   <NotificationSettingsCard context={context} />
 ));
 
-// Resend-only types: these get a "Resend" button instead of ON/OFF toggle
 const resendTypes = [
   { key: 'passwordReset', label: 'Password Reset', description: 'Send a password reset link to the client' },
   { key: 'portalRegistration', label: 'Registration', description: 'Resend the welcome / registration email' }
 ];
 
-// Toggleable notification types
 const userNotificationTypes = [
   { key: 'documentSubmission', label: 'Document Submissions', description: 'Upload confirmation emails' },
   { key: 'weeklyUpdate', label: 'Weekly Updates', description: 'Weekly project summary' }
@@ -41,12 +41,18 @@ function NotificationSettingsCard({ context }) {
   const [preferences, setPreferences] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [resending, setResending] = useState(null); // key of the type currently resending
+  const [resending, setResending] = useState(null);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState('');
   const [viewMode, setViewMode] = useState('client');
 
-  // Load the project email first, then load preferences
+  // Email template state
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [templateEdits, setTemplateEdits] = useState({});
+  const [templateSaving, setTemplateSaving] = useState(false);
+
   const loadData = useCallback(async () => {
     if (!recordId) {
       setError('No record context');
@@ -58,12 +64,10 @@ function NotificationSettingsCard({ context }) {
     setError(null);
 
     try {
-      // Get the project from the backend - it returns the email along with documentData
       const projectRes = await hubspot.fetch(
         `${BACKEND_URL}/api/cards/projects/${recordId}`
       );
       const projectData = await projectRes.json();
-
       const contactEmail = projectData?.email;
 
       if (!contactEmail) {
@@ -74,7 +78,6 @@ function NotificationSettingsCard({ context }) {
 
       setEmail(contactEmail);
 
-      // Load notification preferences
       const prefsRes = await hubspot.fetch(
         `${BACKEND_URL}/api/notifications/cards/preferences/${encodeURIComponent(contactEmail)}`
       );
@@ -92,30 +95,51 @@ function NotificationSettingsCard({ context }) {
     }
   }, [recordId]);
 
+  const loadTemplates = useCallback(async () => {
+    setTemplatesLoading(true);
+    setError(null);
+
+    try {
+      const res = await hubspot.fetch(
+        `${BACKEND_URL}/api/email-templates/cards/all`
+      );
+      const data = await res.json();
+
+      if (data.success) {
+        setTemplates(data.templates);
+      } else {
+        setError(data.error || 'Failed to load email templates');
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to load email templates');
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (viewMode === 'templates' && templates.length === 0) {
+      loadTemplates();
+    }
+  }, [viewMode, templates.length, loadTemplates]);
 
   const handleToggle = useCallback(async (key, currentValue) => {
     if (!email || saving) return;
 
     setSaving(true);
     setError(null);
-
     const newValue = !currentValue;
-
-    // Optimistic update
     setPreferences(prev => ({ ...prev, [key]: newValue }));
 
     try {
       const res = await hubspot.fetch(
         `${BACKEND_URL}/api/notifications/cards/preferences/${encodeURIComponent(email)}`,
-        {
-          method: 'PATCH',
-          body: { [key]: newValue }
-        }
+        { method: 'PATCH', body: { [key]: newValue } }
       );
-
       const data = await res.json();
 
       if (data.success) {
@@ -123,7 +147,6 @@ function NotificationSettingsCard({ context }) {
         setSuccess(`${key} ${newValue ? 'enabled' : 'disabled'}`);
         setTimeout(() => setSuccess(''), 2000);
       } else {
-        // Revert
         setPreferences(prev => ({ ...prev, [key]: currentValue }));
         setError(data.error || 'Failed to update');
       }
@@ -140,23 +163,16 @@ function NotificationSettingsCard({ context }) {
 
     setSaving(true);
     setError(null);
-
     const updates = {};
     types.forEach(t => { updates[t.key] = enable; });
-
-    // Optimistic update
     const prevPrefs = { ...preferences };
     setPreferences(prev => ({ ...prev, ...updates }));
 
     try {
       const res = await hubspot.fetch(
         `${BACKEND_URL}/api/notifications/cards/preferences/${encodeURIComponent(email)}`,
-        {
-          method: 'PATCH',
-          body: updates
-        }
+        { method: 'PATCH', body: updates }
       );
-
       const data = await res.json();
 
       if (data.success) {
@@ -212,6 +228,49 @@ function NotificationSettingsCard({ context }) {
     }
   }, [email, resending]);
 
+  // ─── Template handlers ─────────────────────────────────────────────
+  const handleSelectTemplate = useCallback((tpl) => {
+    setSelectedTemplate(tpl);
+    setTemplateEdits({
+      senderName: tpl.senderName,
+      senderEmail: tpl.senderEmail,
+      subject: tpl.subject,
+      body: tpl.body
+    });
+  }, []);
+
+  const handleSaveTemplate = useCallback(async () => {
+    if (!selectedTemplate || templateSaving) return;
+
+    setTemplateSaving(true);
+    setError(null);
+
+    try {
+      const res = await hubspot.fetch(
+        `${BACKEND_URL}/api/email-templates/cards/${selectedTemplate.key}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(templateEdits)
+        }
+      );
+      const data = await res.json();
+
+      if (data.success) {
+        setTemplates(prev => prev.map(t => t.key === selectedTemplate.key ? data.template : t));
+        setSelectedTemplate(data.template);
+        setSuccess(`"${data.template.label}" template saved`);
+        setTimeout(() => setSuccess(''), 3000);
+      } else {
+        setError(data.error || 'Failed to save template');
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to save template');
+    } finally {
+      setTemplateSaving(false);
+    }
+  }, [selectedTemplate, templateEdits, templateSaving]);
+
   if (loading) {
     return (
       <Flex direction="column" gap="medium" align="center">
@@ -221,15 +280,11 @@ function NotificationSettingsCard({ context }) {
     );
   }
 
-  if (error && !preferences) {
+  if (error && !preferences && viewMode !== 'templates') {
     return (
       <Flex direction="column" gap="medium">
-        <Alert title="Error" variant="error">
-          {error}
-        </Alert>
-        <Button variant="secondary" size="small" onClick={loadData}>
-          Retry
-        </Button>
+        <Alert title="Error" variant="error">{error}</Alert>
+        <Button variant="secondary" size="small" onClick={loadData}>Retry</Button>
       </Flex>
     );
   }
@@ -239,22 +294,18 @@ function NotificationSettingsCard({ context }) {
   return (
     <Box>
       {error && (
-        <Alert title="Error" variant="error">
-          {error}
-        </Alert>
+        <Alert title="Error" variant="error">{error}</Alert>
       )}
       {success && (
-        <Alert title="Updated" variant="success">
-          {success}
-        </Alert>
+        <Alert title="Updated" variant="success">{success}</Alert>
       )}
 
       <Flex direction="column" gap="small">
         <Flex align="center" justify="between">
           <Text format={{ fontWeight: 'bold' }}>
-            Notifications for: {email}
+            {viewMode === 'templates' ? 'Email Templates' : `Notifications for: ${email}`}
           </Text>
-          <Button variant="secondary" size="small" onClick={loadData} disabled={loading}>
+          <Button variant="secondary" size="small" onClick={viewMode === 'templates' ? loadTemplates : loadData} disabled={loading || templatesLoading}>
             Refresh
           </Button>
         </Flex>
@@ -266,7 +317,8 @@ function NotificationSettingsCard({ context }) {
           label="View"
           options={[
             { value: 'client', label: 'Client Notifications', description: 'Emails sent to the client' },
-            { value: 'admin', label: 'Admin Notifications', description: 'Emails sent to admin team' }
+            { value: 'admin', label: 'Admin Notifications', description: 'Emails sent to admin team' },
+            { value: 'templates', label: 'Email Templates', description: 'Edit sender, subject, and body' }
           ]}
           value={viewMode}
           onChange={setViewMode}
@@ -277,69 +329,167 @@ function NotificationSettingsCard({ context }) {
 
         <Divider distance="small" />
 
-        {/* Resend buttons (client view only) */}
-        {viewMode === 'client' && resendTypes.map((type) => (
-          <React.Fragment key={type.key}>
-            <Flex align="center" justify="between" gap="small">
-              <Flex direction="column" gap="flush">
-                <Text format={{ fontWeight: 'bold' }}>{type.label}</Text>
-                <Text variant="microcopy">{type.description}</Text>
-              </Flex>
-              <Button
-                variant="primary"
-                size="small"
-                onClick={() => handleResend(type)}
-                disabled={resending === type.key}
-              >
-                {resending === type.key ? 'Sending...' : 'Resend'}
+        {/* ─── Client / Admin notification views ─────────────────────── */}
+        {viewMode !== 'templates' && (
+          <>
+            {viewMode === 'client' && resendTypes.map((type) => (
+              <React.Fragment key={type.key}>
+                <Flex align="center" justify="between" gap="small">
+                  <Flex direction="column" gap="flush">
+                    <Text format={{ fontWeight: 'bold' }}>{type.label}</Text>
+                    <Text variant="microcopy">{type.description}</Text>
+                  </Flex>
+                  <Button
+                    variant="primary"
+                    size="small"
+                    onClick={() => handleResend(type)}
+                    disabled={resending === type.key}
+                  >
+                    {resending === type.key ? 'Sending...' : 'Resend'}
+                  </Button>
+                </Flex>
+                <Divider distance="flush" />
+              </React.Fragment>
+            ))}
+
+            {currentTypes.map((type) => {
+              const isEnabled = preferences?.[type.key] ?? true;
+              return (
+                <React.Fragment key={type.key}>
+                  <Flex align="center" justify="between" gap="small">
+                    <Flex direction="column" gap="flush">
+                      <Text format={{ fontWeight: 'bold' }}>{type.label}</Text>
+                      <Text variant="microcopy">{type.description}</Text>
+                    </Flex>
+                    <Button
+                      variant={isEnabled ? 'primary' : 'secondary'}
+                      size="small"
+                      onClick={() => handleToggle(type.key, isEnabled)}
+                      disabled={saving}
+                    >
+                      {isEnabled ? 'ON' : 'OFF'}
+                    </Button>
+                  </Flex>
+                  <Divider distance="flush" />
+                </React.Fragment>
+              );
+            })}
+
+            <Flex justify="end" gap="small">
+              <Button variant="primary" size="small" onClick={() => handleEnableAll(currentTypes, true)} disabled={saving}>
+                Enable All
+              </Button>
+              <Button variant="destructive" size="small" onClick={() => handleEnableAll(currentTypes, false)} disabled={saving}>
+                Disable All
               </Button>
             </Flex>
-            <Divider distance="flush" />
-          </React.Fragment>
-        ))}
+          </>
+        )}
 
-        {/* Toggleable notification preferences */}
-        {currentTypes.map((type) => {
-          const isEnabled = preferences?.[type.key] ?? true;
-          return (
-            <React.Fragment key={type.key}>
-              <Flex align="center" justify="between" gap="small">
-                <Flex direction="column" gap="flush">
-                  <Text format={{ fontWeight: 'bold' }}>{type.label}</Text>
-                  <Text variant="microcopy">{type.description}</Text>
-                </Flex>
-                <Button
-                  variant={isEnabled ? 'primary' : 'secondary'}
-                  size="small"
-                  onClick={() => handleToggle(type.key, isEnabled)}
-                  disabled={saving}
-                >
-                  {isEnabled ? 'ON' : 'OFF'}
-                </Button>
+        {/* ─── Email Templates view ──────────────────────────────────── */}
+        {viewMode === 'templates' && (
+          <>
+            {templatesLoading && (
+              <Flex direction="column" gap="medium" align="center">
+                <LoadingSpinner />
+                <Text>Loading templates...</Text>
               </Flex>
-              <Divider distance="flush" />
-            </React.Fragment>
-          );
-        })}
+            )}
 
-        <Flex justify="end" gap="small">
-          <Button
-            variant="primary"
-            size="small"
-            onClick={() => handleEnableAll(currentTypes, true)}
-            disabled={saving}
-          >
-            Enable All
-          </Button>
-          <Button
-            variant="destructive"
-            size="small"
-            onClick={() => handleEnableAll(currentTypes, false)}
-            disabled={saving}
-          >
-            Disable All
-          </Button>
-        </Flex>
+            {!templatesLoading && !selectedTemplate && templates.length > 0 && (
+              <>
+                {templates.map((tpl) => (
+                  <React.Fragment key={tpl.key}>
+                    <Flex align="center" justify="between" gap="small">
+                      <Flex direction="column" gap="flush">
+                        <Text format={{ fontWeight: 'bold' }}>{tpl.label}</Text>
+                        <Text variant="microcopy">{tpl.senderName} &lt;{tpl.senderEmail}&gt;</Text>
+                      </Flex>
+                      <Button
+                        variant="secondary"
+                        size="small"
+                        onClick={() => handleSelectTemplate(tpl)}
+                      >
+                        Edit
+                      </Button>
+                    </Flex>
+                    <Divider distance="flush" />
+                  </React.Fragment>
+                ))}
+              </>
+            )}
+
+            {!templatesLoading && selectedTemplate && (
+              <Flex direction="column" gap="small">
+                <Flex align="center" justify="between">
+                  <Text format={{ fontWeight: 'bold' }}>
+                    Editing: {selectedTemplate.label}
+                  </Text>
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    onClick={() => setSelectedTemplate(null)}
+                  >
+                    Back
+                  </Button>
+                </Flex>
+
+                {selectedTemplate.variables && selectedTemplate.variables.length > 0 && (
+                  <Alert title="Available variables" variant="info">
+                    {selectedTemplate.variables.map(v => `{{${v}}}`).join('  ')}
+                  </Alert>
+                )}
+
+                <Input
+                  label="Sender Name"
+                  name="senderName"
+                  value={templateEdits.senderName || ''}
+                  onChange={(val) => setTemplateEdits(prev => ({ ...prev, senderName: val }))}
+                />
+
+                <Input
+                  label="Sender Email"
+                  name="senderEmail"
+                  value={templateEdits.senderEmail || ''}
+                  onChange={(val) => setTemplateEdits(prev => ({ ...prev, senderEmail: val }))}
+                />
+
+                <Input
+                  label="Subject"
+                  name="subject"
+                  value={templateEdits.subject || ''}
+                  onChange={(val) => setTemplateEdits(prev => ({ ...prev, subject: val }))}
+                />
+
+                <TextArea
+                  label="Email Body (HTML)"
+                  name="body"
+                  value={templateEdits.body || ''}
+                  onChange={(val) => setTemplateEdits(prev => ({ ...prev, body: val }))}
+                  rows={8}
+                />
+
+                <Flex justify="end" gap="small">
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    onClick={() => setSelectedTemplate(null)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="small"
+                    onClick={handleSaveTemplate}
+                    disabled={templateSaving}
+                  >
+                    {templateSaving ? 'Saving...' : 'Save Template'}
+                  </Button>
+                </Flex>
+              </Flex>
+            )}
+          </>
+        )}
       </Flex>
     </Box>
   );

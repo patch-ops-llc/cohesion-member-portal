@@ -132,6 +132,20 @@ export interface AdminNotificationPreferences {
   adminWeeklyUpdate: boolean;
 }
 
+// Email template
+export interface EmailTemplate {
+  id: string;
+  key: string;
+  label: string;
+  senderName: string;
+  senderEmail: string;
+  subject: string;
+  body: string;
+  variables: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 // Pizza tracker stages
 export const pipelineStages = [
   { id: 'collecting', label: 'Collecting Documents' },

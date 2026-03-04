@@ -6,6 +6,7 @@ import {
   FileText, 
   Bell,
   Users,
+  Mail,
   LogOut, 
   Menu, 
   X,
@@ -22,7 +23,8 @@ const navItems = [
   { path: '/admin/projects', icon: FolderOpen, label: 'Projects' },
   { path: '/admin/contacts', icon: Users, label: 'Contacts' },
   { path: '/admin/audit-log', icon: FileText, label: 'Audit Log' },
-  { path: '/admin/notifications', icon: Bell, label: 'Notifications' }
+  { path: '/admin/notifications', icon: Bell, label: 'Notifications' },
+  { path: '/admin/email-templates', icon: Mail, label: 'Email Templates' }
 ];
 
 export function AdminLayout({ children }: AdminLayoutProps) {

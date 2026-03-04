@@ -10,6 +10,7 @@ import fileRoutes from './routes/files';
 import adminRoutes from './routes/admin';
 import cardRoutes from './routes/cards';
 import notificationRoutes from './routes/notifications';
+import emailTemplateRoutes from './routes/emailTemplates';
 import { errorHandler } from './middleware/errorHandler';
 import { logger } from './utils/logger';
 
@@ -74,6 +75,7 @@ app.use('/api/files', fileRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/cards', cardRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/email-templates', emailTemplateRoutes);
 
 // Serve static files in production (for frontend)
 if (process.env.NODE_ENV === 'production') {

@@ -28,6 +28,7 @@ import { ProjectEditor } from './components/admin/ProjectEditor';
 import { AuditLog } from './components/admin/AuditLog';
 import { ContactManager } from './components/admin/ContactManager';
 import { AdminNotificationSettings } from './components/admin/NotificationSettings';
+import { EmailTemplateSettings } from './components/admin/EmailTemplateSettings';
 
 // Auth provider
 import { AuthProvider } from './hooks/useAuth';
@@ -143,6 +144,14 @@ function App() {
                 element={
                   <AdminRoute>
                     <AdminNotificationSettings />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/email-templates"
+                element={
+                  <AdminRoute>
+                    <EmailTemplateSettings />
                   </AdminRoute>
                 }
               />
