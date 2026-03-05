@@ -17,7 +17,7 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
     const adminApiKey = localStorage.getItem('admin_api_key');
-    if (adminApiKey && config.url?.startsWith('/admin')) {
+    if (adminApiKey && (config.url?.startsWith('/admin') || config.url?.startsWith('/email-templates'))) {
       config.headers['X-API-Key'] = adminApiKey;
     }
     return config;
