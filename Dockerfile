@@ -54,7 +54,5 @@ ENV NODE_ENV=production
 # Expose port (Railway provides PORT env var)
 EXPOSE 8080
 
-# Start server immediately; run migrations in background so healthcheck can pass
-# (prisma migrate deploy blocks startup; if DB is slow/unavailable, server never listens)
-# Use absolute path - backend dist is at /app/backend/dist/
-CMD ["sh", "-c", "cd /app/backend && npx prisma migrate deploy 2>&1 & exec node /app/backend/dist/index.js"]
+# Run migrations then start server
+CMD ["sh", "-c", "cd /app/backend && npx prisma migrate deploy && exec node /app/backend/dist/index.js"]

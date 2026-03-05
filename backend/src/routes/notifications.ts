@@ -8,6 +8,7 @@ import { logger } from '../utils/logger';
 import prisma from '../db/client';
 import * as emailService from '../services/email';
 import * as hubspot from '../services/hubspot';
+import { getAdminEmails, setAdminEmails } from '../services/settings';
 
 const router = Router();
 
@@ -82,6 +83,34 @@ router.patch('/preferences', authMiddleware, async (req: AuthRequest, res, next)
   }
 });
 
+// ─── Admin notification email list ────────────────────────────────────
+
+// GET /api/notifications/admin/emails - Get admin email list
+router.get('/admin/emails', adminMiddleware, async (_req, res, next) => {
+  try {
+    const emails = await getAdminEmails();
+    res.json({ success: true, emails });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/notifications/admin/emails - Set admin email list
+router.put('/admin/emails', adminMiddleware, async (req, res, next) => {
+  try {
+    const { emails } = z.object({ emails: z.array(z.string().email()) }).parse(req.body);
+    const saved = await setAdminEmails(emails);
+    logger.info('Admin notification emails updated', { count: saved.length });
+    res.json({ success: true, emails: saved });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid email list', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
 // ─── Admin notification preferences ───────────────────────────────────
 
 const adminPreferencesSchema = z.object({
@@ -100,7 +129,7 @@ const adminBulkPreferencesSchema = z.object({
 // GET /api/notifications/admin/preferences - Get admin notification preferences
 router.get('/admin/preferences', adminMiddleware, async (_req, res, next) => {
   try {
-    const adminEmailsList = (process.env.ADMIN_NOTIFICATION_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
+    const adminEmailsList = await getAdminEmails();
 
     const preferences = await Promise.all(
       adminEmailsList.map(async (email) => {
@@ -169,7 +198,7 @@ router.patch('/admin/preferences', adminMiddleware, async (req, res, next) => {
 router.patch('/admin/preferences/bulk', adminMiddleware, async (req, res, next) => {
   try {
     const updates = adminBulkPreferencesSchema.parse(req.body);
-    const adminEmailsList = (process.env.ADMIN_NOTIFICATION_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
+    const adminEmailsList = await getAdminEmails();
 
     const results = await Promise.all(
       adminEmailsList.map(async (email) => {

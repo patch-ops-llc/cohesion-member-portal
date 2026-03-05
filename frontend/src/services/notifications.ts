@@ -15,6 +15,18 @@ export async function updateUserPreferences(
   return data.preferences;
 }
 
+// ─── Admin notification email list ────────────────────────────────────
+
+export async function getAdminEmails(): Promise<string[]> {
+  const { data } = await api.get('/notifications/admin/emails');
+  return data.emails;
+}
+
+export async function setAdminEmails(emails: string[]): Promise<string[]> {
+  const { data } = await api.put('/notifications/admin/emails', { emails });
+  return data.emails;
+}
+
 // ─── Admin notification preferences ───────────────────────────────────
 
 export async function getAdminPreferences(): Promise<{

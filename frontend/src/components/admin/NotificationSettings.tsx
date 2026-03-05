@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Bell, Check, AlertCircle, Mail } from 'lucide-react';
+import { Bell, Check, AlertCircle, Mail, Plus, X, Save } from 'lucide-react';
 import {
+  getAdminEmails,
+  setAdminEmails,
   getAdminPreferences,
   updateAdminPreference,
   updateAdminPreferencesBulk
@@ -50,28 +52,77 @@ const adminNotificationTypes = [
 ];
 
 export function AdminNotificationSettings() {
-  const [adminEmails, setAdminEmails] = useState<string[]>([]);
+  const [adminEmails, setAdminEmailsState] = useState<string[]>([]);
   const [preferences, setPreferences] = useState<AdminNotificationPreferences[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Email list management
+  const [newEmail, setNewEmail] = useState('');
+  const [emailsSaving, setEmailsSaving] = useState(false);
+  const [emailsDirty, setEmailsDirty] = useState(false);
+
   useEffect(() => {
-    loadPreferences();
+    loadAll();
   }, []);
 
-  const loadPreferences = async () => {
+  const loadAll = async () => {
     try {
       setLoading(true);
       setError(null);
-      const result = await getAdminPreferences();
-      setAdminEmails(result.adminEmails);
-      setPreferences(result.preferences);
+      const [emails, prefsResult] = await Promise.all([
+        getAdminEmails(),
+        getAdminPreferences().catch(() => ({ adminEmails: [], preferences: [] }))
+      ]);
+      setAdminEmailsState(emails);
+      setPreferences(prefsResult.preferences);
+      setEmailsDirty(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load preferences');
+      setError(err instanceof Error ? err.message : 'Failed to load settings');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAddEmail = () => {
+    const trimmed = newEmail.toLowerCase().trim();
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setError('Please enter a valid email address');
+      return;
+    }
+    if (adminEmails.includes(trimmed)) {
+      setError('This email is already in the list');
+      return;
+    }
+    setAdminEmailsState(prev => [...prev, trimmed]);
+    setNewEmail('');
+    setEmailsDirty(true);
+    setError(null);
+  };
+
+  const handleRemoveEmail = (email: string) => {
+    setAdminEmailsState(prev => prev.filter(e => e !== email));
+    setEmailsDirty(true);
+  };
+
+  const handleSaveEmails = async () => {
+    setEmailsSaving(true);
+    setError(null);
+    try {
+      const saved = await setAdminEmails(adminEmails);
+      setAdminEmailsState(saved);
+      setEmailsDirty(false);
+      setSuccessMessage('Admin email list saved');
+      setTimeout(() => setSuccessMessage(null), 3000);
+      // Reload preferences for the updated list
+      const prefsResult = await getAdminPreferences().catch(() => ({ adminEmails: [], preferences: [] }));
+      setPreferences(prefsResult.preferences);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save admin emails');
+    } finally {
+      setEmailsSaving(false);
     }
   };
 
@@ -85,7 +136,6 @@ export function AdminNotificationSettings() {
     setSaving(savingKey);
     setError(null);
 
-    // Optimistic update
     setPreferences(prev =>
       prev.map(p =>
         p.email === email ? { ...p, [key]: newValue } : p
@@ -97,7 +147,6 @@ export function AdminNotificationSettings() {
       setSuccessMessage('Preference updated');
       setTimeout(() => setSuccessMessage(null), 2000);
     } catch (err) {
-      // Revert
       setPreferences(prev =>
         prev.map(p =>
           p.email === email ? { ...p, [key]: currentValue } : p
@@ -117,7 +166,6 @@ export function AdminNotificationSettings() {
     setSaving(savingKey);
     setError(null);
 
-    // Optimistic update
     const prevPrefs = [...preferences];
     setPreferences(prev => prev.map(p => ({ ...p, [key]: value })));
 
@@ -155,7 +203,7 @@ export function AdminNotificationSettings() {
         <div>
           <h2 className="text-xl font-bold text-gray-900">Admin Notification Settings</h2>
           <p className="text-sm text-gray-500">
-            Control which email notifications admin users receive
+            Manage admin email recipients and notification preferences
           </p>
         </div>
       </div>
@@ -174,12 +222,80 @@ export function AdminNotificationSettings() {
         </div>
       )}
 
-      {adminEmails.length === 0 ? (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-700 text-sm">
-          <p className="font-semibold">No admin notification emails configured</p>
-          <p className="mt-1">Set <code className="bg-amber-100 px-1 rounded">ADMIN_NOTIFICATION_EMAILS</code> in your environment variables to enable admin notifications.</p>
+      {/* Admin Email List */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-900">Admin Notification Recipients</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            These email addresses will receive admin notifications (new registrations, document submissions, weekly summary)
+          </p>
         </div>
-      ) : (
+        <div className="p-5 space-y-3">
+          {/* Current emails */}
+          {adminEmails.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {adminEmails.map(email => (
+                <span
+                  key={email}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-full text-sm"
+                >
+                  <Mail className="h-3.5 w-3.5 text-gray-400" />
+                  <span>{email}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveEmail(email)}
+                    className="text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 italic">No admin emails configured yet.</p>
+          )}
+
+          {/* Add new email */}
+          <div className="flex items-center space-x-2">
+            <div className="relative flex-1">
+              <input
+                type="email"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddEmail()}
+                placeholder="Add admin email address..."
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleAddEmail}
+              className="flex items-center space-x-1 px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add</span>
+            </button>
+          </div>
+
+          {/* Save button */}
+          {emailsDirty && (
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={handleSaveEmails}
+                disabled={emailsSaving}
+                className="flex items-center space-x-1.5 px-4 py-2 text-sm text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
+              >
+                <Save className="h-3.5 w-3.5" />
+                <span>{emailsSaving ? 'Saving...' : 'Save Changes'}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Notification preferences - only show if emails exist */}
+      {adminEmails.length > 0 && preferences.length > 0 && (
         <>
           {/* Quick toggle for all admins */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200">
@@ -240,10 +356,6 @@ export function AdminNotificationSettings() {
           )}
         </>
       )}
-
-      <p className="text-xs text-gray-400 text-center">
-        Admin notification emails are configured via the ADMIN_NOTIFICATION_EMAILS environment variable.
-      </p>
     </div>
   );
 }

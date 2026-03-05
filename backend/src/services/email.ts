@@ -2,6 +2,7 @@ import { Resend } from 'resend';
 import { logger } from '../utils/logger';
 import prisma from '../db/client';
 import { DEFAULT_TEMPLATES } from './emailTemplateDefaults';
+import { getAdminEmails } from './settings';
 
 let resendInstance: Resend | null = null;
 function getResend(): Resend | null {
@@ -15,7 +16,6 @@ function getResend(): Resend | null {
 const fromEmail = process.env.FROM_EMAIL || 'noreply@example.com';
 const fromName = process.env.FROM_NAME || 'Cohesion Portal';
 const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-const adminEmails = (process.env.ADMIN_NOTIFICATION_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
 
 // ─── Template loader ──────────────────────────────────────────────────
 interface LoadedTemplate {
@@ -121,6 +121,7 @@ async function shouldSendToUser(email: string, type: string): Promise<boolean> {
 }
 
 async function getAdminRecipientsFor(type: string): Promise<string[]> {
+  const adminEmails = await getAdminEmails();
   if (adminEmails.length === 0) return [];
   const recipients: string[] = [];
   for (const email of adminEmails) {

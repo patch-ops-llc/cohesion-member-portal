@@ -99,6 +99,15 @@ model EmailTemplate {
   @@map("email_templates")
 }
 
+// Key-value app settings (admin emails, etc.)
+model AppSetting {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}
+
 // Audit log for tracking changes
 model AuditLog {
   id         String   @id @default(uuid())
