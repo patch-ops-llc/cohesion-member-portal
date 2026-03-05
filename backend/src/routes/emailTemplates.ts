@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import type { EmailTemplate } from '@prisma/client';
 import { adminMiddleware } from '../middleware/admin';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
@@ -11,7 +12,7 @@ const router = Router();
 // GET /api/email-templates - List all email templates (seed defaults if missing)
 router.get('/', adminMiddleware, async (_req, res, next) => {
   try {
-    let templates = await prisma.emailTemplate.findMany({
+    let templates: EmailTemplate[] = await prisma.emailTemplate.findMany({
       orderBy: { key: 'asc' }
     });
 
@@ -122,7 +123,7 @@ router.post('/reset/:key', adminMiddleware, async (req, res, next) => {
 // GET /api/email-templates/cards/all - List all templates (for HubSpot card)
 router.get('/cards/all', async (_req, res, next) => {
   try {
-    let templates = await prisma.emailTemplate.findMany({
+    let templates: EmailTemplate[] = await prisma.emailTemplate.findMany({
       orderBy: { key: 'asc' }
     });
 
