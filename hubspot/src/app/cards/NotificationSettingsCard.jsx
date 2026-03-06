@@ -52,6 +52,8 @@ function NotificationSettingsCard({ context }) {
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [templateEdits, setTemplateEdits] = useState({});
   const [templateSaving, setTemplateSaving] = useState(false);
+  const [testRecipient, setTestRecipient] = useState('');
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!recordId) {
@@ -237,7 +239,45 @@ function NotificationSettingsCard({ context }) {
       subject: tpl.subject,
       body: tpl.body
     });
-  }, []);
+    if (email) setTestRecipient(email);
+  }, [email]);
+
+  const handleSendTestEmail = useCallback(async () => {
+    if (!selectedTemplate || sendingTestEmail || !testRecipient) return;
+
+    setSendingTestEmail(true);
+    setError(null);
+
+    try {
+      const res = await hubspot.fetch(
+        `${BACKEND_URL}/api/email-templates/cards/test/${selectedTemplate.key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipientEmail: testRecipient })
+        }
+      );
+
+      let data;
+      try {
+        data = await res.json();
+      } catch (_parseErr) {
+        setError(`Server returned an invalid response (HTTP ${res.status}).`);
+        return;
+      }
+
+      if (data.success) {
+        setSuccess(data.message || 'Test email sent');
+        setTimeout(() => setSuccess(''), 4000);
+      } else {
+        setError(data.error || 'Failed to send test email');
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to send test email');
+    } finally {
+      setSendingTestEmail(false);
+    }
+  }, [selectedTemplate, testRecipient, sendingTestEmail]);
 
   const handleSaveTemplate = useCallback(async () => {
     if (!selectedTemplate || templateSaving) return;
@@ -468,6 +508,30 @@ function NotificationSettingsCard({ context }) {
                   onChange={(val) => setTemplateEdits(prev => ({ ...prev, body: val }))}
                   rows={8}
                 />
+
+                <Divider distance="small" />
+
+                <Text format={{ fontWeight: 'bold' }}>Send Test Email</Text>
+                <Text variant="microcopy">Subject will be prefixed with [TEST]. Variables are filled with sample data.</Text>
+                <Flex align="end" gap="small">
+                  <Input
+                    label="Recipient"
+                    name="testRecipient"
+                    value={testRecipient}
+                    onChange={setTestRecipient}
+                    placeholder="recipient@example.com"
+                  />
+                  <Button
+                    variant="primary"
+                    size="small"
+                    onClick={handleSendTestEmail}
+                    disabled={sendingTestEmail || !testRecipient}
+                  >
+                    {sendingTestEmail ? 'Sending...' : 'Send Test'}
+                  </Button>
+                </Flex>
+
+                <Divider distance="small" />
 
                 <Flex justify="end" gap="small">
                   <Button

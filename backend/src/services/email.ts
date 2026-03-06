@@ -400,3 +400,41 @@ export async function sendAdminWeeklyUpdateEmail(summary: AdminWeeklySummary): P
 
   await sendEmail(recipients, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }
+
+// ─── TEST EMAIL ────────────────────────────────────────────────────────
+const SAMPLE_VARS: Record<string, string> = {
+  displayName: 'Jane Doe',
+  resetUrl: '#test-reset-link',
+  loginUrl: '#test-login-link',
+  portalUrl: '#test-portal-link',
+  adminUrl: '#test-admin-link',
+  userEmail: 'jane.doe@example.com',
+  email: 'jane.doe@example.com',
+  time: new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }),
+  projectName: 'Doe 2025 Tax Return',
+  categoryLabel: 'W-2s',
+  documentName: 'John W2',
+  filename: 'w2_2025.pdf',
+  projectRows: '<p style="color:#666;font-style:italic;">[Weekly project summary table would appear here]</p>',
+  totalProjects: '12',
+  activeProjects: '8',
+  totalPending: '5',
+  totalAccepted: '23',
+  newRegistrations: '3',
+  newUploads: '7'
+};
+
+export async function sendTestEmailForTemplate(
+  templateKey: string,
+  recipientEmail: string
+): Promise<void> {
+  const tpl = await loadTemplate(templateKey);
+  if (!tpl.subject && !tpl.body) {
+    throw new Error(`Template "${templateKey}" not found`);
+  }
+
+  const subject = interpolate(`[TEST] ${tpl.subject}`, SAMPLE_VARS);
+  const body = interpolate(tpl.body, SAMPLE_VARS);
+
+  await sendEmail(recipientEmail, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
+}

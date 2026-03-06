@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Mail, Save, RotateCcw, ChevronDown, ChevronRight, AlertCircle, Check, Eye, EyeOff, Info } from 'lucide-react';
+import { Mail, Save, RotateCcw, ChevronDown, ChevronRight, AlertCircle, Check, Eye, EyeOff, Info, Send } from 'lucide-react';
 import {
   getEmailTemplates,
   updateEmailTemplate,
-  resetEmailTemplate
+  resetEmailTemplate,
+  sendTestEmail
 } from '../../services/notifications';
 import type { EmailTemplate } from '../../types';
 
@@ -16,6 +17,8 @@ export function EmailTemplateSettings() {
   const [editState, setEditState] = useState<Record<string, Partial<EmailTemplate>>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const [testEmailAddress, setTestEmailAddress] = useState<Record<string, string>>({});
+  const [sendingTest, setSendingTest] = useState<string | null>(null);
 
   useEffect(() => {
     loadTemplates();
@@ -129,6 +132,27 @@ export function EmailTemplateSettings() {
       edits.subject !== tpl.subject ||
       edits.body !== tpl.body
     );
+  };
+
+  const handleSendTest = async (key: string) => {
+    const recipient = testEmailAddress[key]?.trim();
+    if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+      setError('Please enter a valid email address for the test');
+      return;
+    }
+
+    setSendingTest(key);
+    setError(null);
+
+    try {
+      const message = await sendTestEmail(key, recipient);
+      setSuccessMessage(message);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send test email');
+    } finally {
+      setSendingTest(null);
+    }
   };
 
   if (loading) {
@@ -280,6 +304,31 @@ export function EmailTemplateSettings() {
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary font-mono"
                       />
                     )}
+                  </div>
+
+                  {/* Send Test Email */}
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-xs font-semibold text-amber-700 mb-2">Send Test Email</p>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="email"
+                        value={testEmailAddress[tpl.key] || ''}
+                        onChange={(e) => setTestEmailAddress(prev => ({ ...prev, [tpl.key]: e.target.value }))}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSendTest(tpl.key)}
+                        placeholder="recipient@example.com"
+                        className="flex-1 px-3 py-2 text-sm border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-amber-400 bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSendTest(tpl.key)}
+                        disabled={sendingTest === tpl.key}
+                        className="flex items-center space-x-1.5 px-3 py-2 text-sm text-amber-800 bg-amber-200 rounded-lg hover:bg-amber-300 disabled:opacity-50"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        <span>{sendingTest === tpl.key ? 'Sending...' : 'Send Test'}</span>
+                      </button>
+                    </div>
+                    <p className="text-xs text-amber-600 mt-1.5">Subject will be prefixed with [TEST]. Variables are filled with sample data.</p>
                   </div>
 
                   {/* Actions */}

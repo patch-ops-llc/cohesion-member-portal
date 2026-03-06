@@ -5,6 +5,7 @@ import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import prisma from '../db/client';
 import { DEFAULT_TEMPLATES } from '../services/emailTemplateDefaults';
+import { sendTestEmailForTemplate } from '../services/email';
 
 type EmailTemplateRecord = Awaited<ReturnType<typeof prisma.emailTemplate.findMany>>[number];
 
@@ -172,6 +173,65 @@ router.put('/cards/:key', async (req, res, next) => {
     } else {
       next(error);
     }
+  }
+});
+
+// ─── Send test email ──────────────────────────────────────────────────
+
+const testEmailSchema = z.object({
+  recipientEmail: z.string().email()
+});
+
+// POST /api/email-templates/test/:key - Send a test email (admin)
+router.post('/test/:key', adminMiddleware, async (req, res, next) => {
+  try {
+    const { key } = req.params;
+    const { recipientEmail } = testEmailSchema.parse(req.body);
+
+    const template = await prisma.emailTemplate.findUnique({ where: { key } });
+    if (!template && !DEFAULT_TEMPLATES.find(d => d.key === key)) {
+      throw new AppError('Template not found', 404);
+    }
+
+    await sendTestEmailForTemplate(key, recipientEmail);
+    logger.info('Test email sent', { key, recipientEmail });
+    res.json({ success: true, message: `Test email sent to ${recipientEmail}` });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Please provide a valid recipient email', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// POST /api/email-templates/cards/test/:key - Send a test email (HubSpot card)
+router.post('/cards/test/:key', async (req, res, next) => {
+  try {
+    const { key } = req.params;
+
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch {
+        return res.status(400).json({ success: false, error: 'Invalid JSON body' });
+      }
+    }
+
+    const { recipientEmail } = testEmailSchema.parse(body);
+
+    const template = await prisma.emailTemplate.findUnique({ where: { key } });
+    if (!template && !DEFAULT_TEMPLATES.find(d => d.key === key)) {
+      return res.status(404).json({ success: false, error: 'Template not found' });
+    }
+
+    await sendTestEmailForTemplate(key, recipientEmail);
+    logger.info('Test email sent via HubSpot card', { key, recipientEmail });
+    res.json({ success: true, message: `Test email sent to ${recipientEmail}` });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, error: 'Please provide a valid recipient email' });
+    }
+    next(error);
   }
 });
 

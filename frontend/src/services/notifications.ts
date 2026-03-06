@@ -76,3 +76,8 @@ export async function resetEmailTemplate(key: string): Promise<EmailTemplate> {
   const { data } = await api.post(`/email-templates/reset/${key}`);
   return data.template;
 }
+
+export async function sendTestEmail(key: string, recipientEmail: string): Promise<string> {
+  const { data } = await api.post(`/email-templates/test/${key}`, { recipientEmail });
+  return data.message;
+}
