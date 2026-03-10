@@ -418,7 +418,8 @@ export async function createProject(properties: {
           client_project_name: properties.client_project_name,
           email: properties.email.toLowerCase().trim(),
           document_data: JSON.stringify(defaultDocumentData)
-        }
+        },
+        associations: []
       }
     );
 
@@ -437,12 +438,15 @@ export async function createProject(properties: {
 // Associate a project with a HubSpot contact
 export async function associateProjectWithContact(projectId: string, contactId: string): Promise<void> {
   try {
-    await hubspotClient.crm.objects.associationsApi.create(
-      CUSTOM_OBJECT_TYPE,
-      projectId,
-      'contacts',
-      contactId,
-      [{ associationCategory: 'HUBSPOT_DEFINED' as any, associationTypeId: 279 }]
+    await axios.put(
+      `https://api.hubapi.com/crm/v4/objects/${CUSTOM_OBJECT_TYPE}/${projectId}/associations/contacts/${contactId}`,
+      [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 279 }],
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
     );
     logger.info('Associated project with contact', { projectId, contactId });
   } catch (error) {
