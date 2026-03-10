@@ -93,26 +93,30 @@ export async function getProjectsByEmail(email: string): Promise<Project[]> {
   }
 }
 
-// Get all projects (for admin)
-export async function getAllProjects(limit: number = 100, after?: string): Promise<{
-  projects: Project[];
-  paging?: { next?: { after: string } };
-}> {
-  try {
-    const response = await hubspotClient.crm.objects.basicApi.getPage(
-      CUSTOM_OBJECT_TYPE,
-      limit,
-      after,
-      ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data']
-    );
+// Get all projects (for admin) — paginates through all HubSpot pages
+export async function getAllProjects(): Promise<{ projects: Project[] }> {
+  const allProjects: Project[] = [];
+  let after: string | undefined;
 
-    return {
-      projects: response.results.map(p => ({
+  try {
+    do {
+      const response = await hubspotClient.crm.objects.basicApi.getPage(
+        CUSTOM_OBJECT_TYPE,
+        100,
+        after,
+        ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data']
+      );
+
+      allProjects.push(...response.results.map(p => ({
         id: p.id,
         properties: p.properties as unknown as ProjectProperties
-      })),
-      paging: response.paging
-    };
+      })));
+
+      after = response.paging?.next?.after;
+    } while (after);
+
+    logger.info(`Fetched all projects from HubSpot`, { count: allProjects.length });
+    return { projects: allProjects };
   } catch (error) {
     logger.error('Failed to get all projects', { error: String(error) });
     throw error;

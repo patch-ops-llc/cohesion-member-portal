@@ -19,11 +19,9 @@ router.use(adminMiddleware);
 // GET /api/admin/projects - List all projects with search/filter
 router.get('/projects', async (req, res, next) => {
   try {
-    const { search, limit = '20' } = req.query;
-    const limitNum = Math.min(parseInt(limit as string), 100);
+    const { search } = req.query;
 
-    // Get all projects from HubSpot
-    const result = await hubspot.getAllProjects(limitNum);
+    const result = await hubspot.getAllProjects();
     
     let projects = result.projects;
 
@@ -70,7 +68,7 @@ router.get('/projects', async (req, res, next) => {
       success: true,
       projects: transformedProjects,
       total: transformedProjects.length,
-      hasMore: !!result.paging?.next?.after
+      hasMore: false
     });
   } catch (error) {
     next(error);
@@ -239,7 +237,7 @@ router.get('/audit-log', async (req, res, next) => {
 // GET /api/admin/stats - Dashboard statistics
 router.get('/stats', async (req, res, next) => {
   try {
-    const result = await hubspot.getAllProjects(100);
+    const result = await hubspot.getAllProjects();
     
     let totalProjects = result.projects.length;
     let pendingReviewCount = 0;
