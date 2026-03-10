@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Search, FolderOpen, ArrowRight, RefreshCw, Mail, CheckSquare, Square, Loader2,
-  KeyRound, ExternalLink, CheckCircle2, XCircle, Plus, X, UserSearch
+  KeyRound, ExternalLink, CheckCircle2, XCircle, Plus, X, UserSearch,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import api from '../../services/api';
 import { InlineLoader } from '../shared/LoadingSpinner';
@@ -225,9 +226,13 @@ function CreateProjectModal({ onClose, onCreated }: { onClose: () => void; onCre
   );
 }
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+
 export function ProjectManager() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(10);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [inviteResults, setInviteResults] = useState<InviteResponse | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -237,24 +242,30 @@ export function ProjectManager() {
     status: 'success' | 'error';
     message: string;
   } | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
-    setTimeout(() => setDebouncedSearch(value), 300);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value);
+      setCurrentPage(1);
+    }, 300);
   };
 
+  useEffect(() => {
+    return () => clearTimeout(debounceRef.current);
+  }, []);
+
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['admin', 'projects', debouncedSearch],
+    queryKey: ['admin', 'projects'],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (debouncedSearch) params.set('search', debouncedSearch);
-      
       const response = await api.get<{ 
         success: boolean; 
         projects: AdminProject[]; 
         total: number;
         hasMore: boolean;
-      }>(`/admin/projects?${params}`);
+      }>('/admin/projects');
       return response.data;
     }
   });
@@ -295,7 +306,21 @@ export function ProjectManager() {
     }
   });
 
-  const projects = data?.projects || [];
+  const allProjects = data?.projects || [];
+
+  const filteredProjects = useMemo(() => {
+    if (!debouncedSearch) return allProjects;
+    const q = debouncedSearch.toLowerCase();
+    return allProjects.filter(p =>
+      p.name?.toLowerCase().includes(q) ||
+      p.email?.toLowerCase().includes(q)
+    );
+  }, [allProjects, debouncedSearch]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredProjects.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * pageSize;
+  const paginatedProjects = filteredProjects.slice(startIndex, startIndex + pageSize);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -309,15 +334,21 @@ export function ProjectManager() {
     });
   };
 
-  const toggleSelectAll = () => {
-    if (selectedIds.size === projects.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(projects.map(p => p.id)));
-    }
+  const pageProjectIds = paginatedProjects.map(p => p.id);
+  const allPageSelected = pageProjectIds.length > 0 && pageProjectIds.every(id => selectedIds.has(id));
+
+  const toggleSelectAllPage = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allPageSelected) {
+        pageProjectIds.forEach(id => next.delete(id));
+      } else {
+        pageProjectIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
   };
 
-  const allSelected = projects.length > 0 && selectedIds.size === projects.length;
   const someSelected = selectedIds.size > 0;
 
   const handleProjectCreated = () => {
@@ -329,6 +360,11 @@ export function ProjectManager() {
       message: 'Project created successfully'
     });
     setTimeout(() => setActionFeedback(null), 5000);
+  };
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize);
+    setCurrentPage(1);
   };
 
   return (
@@ -463,7 +499,7 @@ export function ProjectManager() {
           message={error instanceof Error ? error.message : 'Failed to load projects'}
           onRetry={refetch}
         />
-      ) : !projects.length ? (
+      ) : !filteredProjects.length ? (
         <div className="text-center py-12">
           <FolderOpen className="h-12 w-12 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-500 mb-4">
@@ -480,135 +516,185 @@ export function ProjectManager() {
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left">
-                  <button
-                    onClick={toggleSelectAll}
-                    className="text-gray-400 hover:text-gray-600 transition-colors"
-                    title={allSelected ? 'Deselect all' : 'Select all'}
-                  >
-                    {allSelected ? (
-                      <CheckSquare className="h-5 w-5 text-primary" />
-                    ) : (
-                      <Square className="h-5 w-5" />
-                    )}
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Project
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Email
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Documents
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Pending
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Accepted
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {projects.map((project) => {
-                const isResetLoading = sendResetMutation.isPending && sendResetMutation.variables === project.email;
+        <>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left">
+                    <button
+                      onClick={toggleSelectAllPage}
+                      className="text-gray-400 hover:text-gray-600 transition-colors"
+                      title={allPageSelected ? 'Deselect page' : 'Select page'}
+                    >
+                      {allPageSelected ? (
+                        <CheckSquare className="h-5 w-5 text-primary" />
+                      ) : (
+                        <Square className="h-5 w-5" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Project
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Email
+                  </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Documents
+                  </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Pending
+                  </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Accepted
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {paginatedProjects.map((project) => {
+                  const isResetLoading = sendResetMutation.isPending && sendResetMutation.variables === project.email;
 
-                return (
-                  <tr
-                    key={project.id}
-                    className={`hover:bg-gray-50 ${selectedIds.has(project.id) ? 'bg-primary-50' : ''}`}
-                  >
-                    <td className="px-4 py-4">
-                      <button
-                        onClick={() => toggleSelect(project.id)}
-                        className="text-gray-400 hover:text-gray-600 transition-colors"
-                      >
-                        {selectedIds.has(project.id) ? (
-                          <CheckSquare className="h-5 w-5 text-primary" />
-                        ) : (
-                          <Square className="h-5 w-5" />
-                        )}
-                      </button>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-2">
-                        <span className="font-medium text-gray-900">{project.name}</span>
-                        <a
-                          href={getHubSpotProjectUrl(project.id)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-gray-400 hover:text-primary transition-colors"
-                          title="Open in HubSpot"
-                          onClick={(e) => e.stopPropagation()}
+                  return (
+                    <tr
+                      key={project.id}
+                      className={`hover:bg-gray-50 ${selectedIds.has(project.id) ? 'bg-primary-50' : ''}`}
+                    >
+                      <td className="px-4 py-4">
+                        <button
+                          onClick={() => toggleSelect(project.id)}
+                          className="text-gray-400 hover:text-gray-600 transition-colors"
                         >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-500">
-                      {project.email}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className="text-gray-900">{project.stats.totalDocs}</span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      {project.stats.pendingDocs > 0 ? (
-                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-700">
-                          {project.stats.pendingDocs}
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">0</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      {project.stats.acceptedDocs > 0 ? (
-                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
-                          {project.stats.acceptedDocs}
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">0</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <div className="flex items-center justify-end space-x-2">
-                        {project.email && (
-                          <button
-                            onClick={() => sendResetMutation.mutate(project.email)}
-                            disabled={isResetLoading}
-                            className="inline-flex items-center space-x-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
-                            title="Send password reset"
+                          {selectedIds.has(project.id) ? (
+                            <CheckSquare className="h-5 w-5 text-primary" />
+                          ) : (
+                            <Square className="h-5 w-5" />
+                          )}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-medium text-gray-900">{project.name}</span>
+                          <a
+                            href={getHubSpotProjectUrl(project.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-gray-400 hover:text-primary transition-colors"
+                            title="Open in HubSpot"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            {isResetLoading ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <KeyRound className="h-3.5 w-3.5" />
-                            )}
-                            <span>Reset PW</span>
-                          </button>
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-gray-500">
+                        {project.email}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className="text-gray-900">{project.stats.totalDocs}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        {project.stats.pendingDocs > 0 ? (
+                          <span className="px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-700">
+                            {project.stats.pendingDocs}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">0</span>
                         )}
-                        <Link
-                          to={`/admin/projects/${project.id}`}
-                          className="inline-flex items-center space-x-1 px-3 py-1.5 text-xs font-medium rounded-lg text-primary hover:bg-primary-50 transition-colors"
-                        >
-                          <span>View</span>
-                          <ArrowRight className="h-4 w-4" />
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        {project.stats.acceptedDocs > 0 ? (
+                          <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
+                            {project.stats.acceptedDocs}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">0</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <div className="flex items-center justify-end space-x-2">
+                          {project.email && (
+                            <button
+                              onClick={() => sendResetMutation.mutate(project.email)}
+                              disabled={isResetLoading}
+                              className="inline-flex items-center space-x-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                              title="Send password reset"
+                            >
+                              {isResetLoading ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <KeyRound className="h-3.5 w-3.5" />
+                              )}
+                              <span>Reset PW</span>
+                            </button>
+                          )}
+                          <Link
+                            to={`/admin/projects/${project.id}`}
+                            className="inline-flex items-center space-x-1 px-3 py-1.5 text-xs font-medium rounded-lg text-primary hover:bg-primary-50 transition-colors"
+                          >
+                            <span>View</span>
+                            <ArrowRight className="h-4 w-4" />
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3 text-sm text-gray-500">
+              <span>
+                Showing {startIndex + 1}–{Math.min(startIndex + pageSize, filteredProjects.length)} of {filteredProjects.length}
+                {debouncedSearch && ` (${allProjects.length} total)`}
+              </span>
+              <span className="text-gray-300">|</span>
+              <div className="flex items-center gap-1.5">
+                <span>Show</span>
+                {PAGE_SIZE_OPTIONS.map(size => (
+                  <button
+                    key={size}
+                    onClick={() => handlePageSizeChange(size)}
+                    className={`px-2 py-0.5 rounded text-sm font-medium transition-colors ${
+                      pageSize === size
+                        ? 'bg-primary text-white'
+                        : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+                className="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Prev
+              </button>
+              <span className="text-sm text-gray-600 px-2">
+                Page {safePage} of {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={safePage >= totalPages}
+                className="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
