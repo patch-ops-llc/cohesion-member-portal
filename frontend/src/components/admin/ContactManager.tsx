@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   Search, Users, RefreshCw, Mail, KeyRound, Loader2,
-  CheckCircle2, XCircle, CheckSquare, Square, MinusSquare
+  CheckCircle2, XCircle, CheckSquare, Square, MinusSquare, ExternalLink
 } from 'lucide-react';
 import api from '../../services/api';
 import { InlineLoader } from '../shared/LoadingSpinner';
@@ -34,6 +34,12 @@ interface BulkInviteResponse {
     alreadyRegistered: number;
     errors: number;
   };
+}
+
+const HUBSPOT_PORTAL_ID = '242796132';
+
+function getHubSpotContactUrl(contactId: string) {
+  return `https://app-na2.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/contact/${contactId}`;
 }
 
 export function ContactManager() {
@@ -180,7 +186,7 @@ export function ContactManager() {
             type="text"
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Search contacts by name or email..."
+            placeholder="Search clients by name or email..."
             className="input pl-10"
           />
         </div>
@@ -276,17 +282,17 @@ export function ContactManager() {
 
       {/* Results */}
       {isLoading ? (
-        <InlineLoader message="Loading contacts..." />
+        <InlineLoader message="Loading clients..." />
       ) : error ? (
         <ErrorMessage
-          message={error instanceof Error ? error.message : 'Failed to load contacts'}
+          message={error instanceof Error ? error.message : 'Failed to load clients'}
           onRetry={refetch}
         />
       ) : !contacts.length ? (
         <div className="text-center py-12">
           <Users className="h-12 w-12 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-500">
-            {search ? 'No contacts match your search' : 'No contacts found'}
+            {search ? 'No clients match your search' : 'No clients found'}
           </p>
         </div>
       ) : (
@@ -294,7 +300,7 @@ export function ContactManager() {
           {/* Selection summary */}
           {unregisteredContacts.length > 0 && (
             <div className="flex items-center gap-3 text-sm text-gray-500">
-              <span>{unregisteredContacts.length} unregistered contact{unregisteredContacts.length !== 1 ? 's' : ''}</span>
+              <span>{unregisteredContacts.length} unregistered client{unregisteredContacts.length !== 1 ? 's' : ''}</span>
               {!someSelected && (
                 <button
                   onClick={toggleSelectAllUnregistered}
@@ -334,7 +340,7 @@ export function ContactManager() {
                     </button>
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Contact
+                    Client
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Email
@@ -384,9 +390,21 @@ export function ContactManager() {
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="font-medium text-gray-900">
-                          {displayName || <span className="text-gray-400 italic">No name</span>}
-                        </span>
+                        <div className="flex items-center space-x-2">
+                          <span className="font-medium text-gray-900">
+                            {displayName || <span className="text-gray-400 italic">No name</span>}
+                          </span>
+                          <a
+                            href={getHubSpotContactUrl(contact.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-gray-400 hover:text-primary transition-colors"
+                            title="Open in HubSpot"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-gray-500">
                         {contact.email}

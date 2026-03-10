@@ -259,6 +259,7 @@ const advisoryStageLabels: Record<string, string> = {
 | Document Checklist | List categories with upload buttons per document | P0 |
 | File Upload | Drag-and-drop, progress bar, multi-file for 1099s | P0 |
 | Status Display | Show pending/accepted/needs resubmission icons | P0 |
+| Notification Center | Toggle email notifications on/off (password reset, registration, document submission, weekly updates) | P0 |
 | Mobile Responsive | Works on phones/tablets | P1 |
 
 ### Admin Dashboard Features
@@ -271,6 +272,8 @@ const advisoryStageLabels: Record<string, string> = {
 | Category Management | Toggle categories on/off | P0 |
 | Document Status Update | Accept, reject, request resubmission | P0 |
 | Add Documents | Add new document slots to categories | P0 |
+| Notification Management | Configure admin notification emails, per-admin preference toggles, bulk enable/disable | P0 |
+| Email Template Editor | Customize sender, subject, and body for all transactional email types; send test emails | P0 |
 | File Preview | View uploaded files | P1 |
 | Audit Log | Track who changed what and when | P2 |
 
@@ -355,6 +358,68 @@ GET /admin/audit-log
   Headers: Authorization: Bearer <admin-token>
   Query: ?projectId=&action=&startDate=&endDate=
   Response: { entries: AuditEntry[] }
+```
+
+### Notification Endpoints
+
+```
+GET /notifications/preferences
+  Headers: Authorization: Bearer <jwt>
+  Response: { preferences: { passwordReset, portalRegistration, documentSubmission, weeklyUpdate } }
+
+PATCH /notifications/preferences
+  Headers: Authorization: Bearer <jwt>
+  Body: { passwordReset?: boolean, documentSubmission?: boolean, weeklyUpdate?: boolean, ... }
+  Response: { preferences: UserNotificationPreferences }
+
+GET /notifications/admin/emails
+  Headers: Authorization: Bearer <admin-token>
+  Response: { emails: string[] }
+
+PUT /notifications/admin/emails
+  Headers: Authorization: Bearer <admin-token>
+  Body: { emails: string[] }
+  Response: { emails: string[] }
+
+GET /notifications/admin/preferences
+  Headers: Authorization: Bearer <admin-token>
+  Response: { adminEmails: string[], preferences: AdminNotificationPreferences[] }
+
+PATCH /notifications/admin/preferences
+  Headers: Authorization: Bearer <admin-token>
+  Body: { email, adminRegistration?, adminDocumentSubmission?, adminWeeklyUpdate? }
+  Response: { preferences: AdminNotificationPreferences }
+
+PATCH /notifications/admin/preferences/bulk
+  Headers: Authorization: Bearer <admin-token>
+  Body: { adminRegistration?, adminDocumentSubmission?, adminWeeklyUpdate? }
+  Response: { preferences: AdminNotificationPreferences[] }
+```
+
+### Email Template Endpoints
+
+```
+GET /email-templates
+  Headers: Authorization: Bearer <admin-token>
+  Response: { templates: EmailTemplate[] }
+
+GET /email-templates/:key
+  Headers: Authorization: Bearer <admin-token>
+  Response: { template: EmailTemplate }
+
+PUT /email-templates/:key
+  Headers: Authorization: Bearer <admin-token>
+  Body: { senderName?, senderEmail?, subject?, body? }
+  Response: { template: EmailTemplate }
+
+POST /email-templates/reset/:key
+  Headers: Authorization: Bearer <admin-token>
+  Response: { template: EmailTemplate }
+
+POST /email-templates/test/:key
+  Headers: Authorization: Bearer <admin-token>
+  Body: { recipientEmail: string }
+  Response: { message: string }
 ```
 
 ### File Endpoints
@@ -447,6 +512,46 @@ CREATE TABLE audit_log (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Notification preferences (per email, covers both client and admin prefs)
+CREATE TABLE notification_preferences (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email VARCHAR(255) UNIQUE NOT NULL,
+  -- Client preferences (default: true)
+  password_reset BOOLEAN DEFAULT true,
+  portal_registration BOOLEAN DEFAULT true,
+  document_submission BOOLEAN DEFAULT true,
+  weekly_update BOOLEAN DEFAULT true,
+  -- Admin preferences (default: true)
+  admin_registration BOOLEAN DEFAULT true,
+  admin_document_submission BOOLEAN DEFAULT true,
+  admin_weekly_update BOOLEAN DEFAULT true,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Email templates (customizable transactional emails)
+CREATE TABLE email_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key VARCHAR(100) UNIQUE NOT NULL,
+  label VARCHAR(255) NOT NULL,
+  sender_name VARCHAR(255),
+  sender_email VARCHAR(255),
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  variables TEXT[],
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- App settings (key-value store for admin config like notification email lists)
+CREATE TABLE app_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key VARCHAR(255) UNIQUE NOT NULL,
+  value TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Indexes
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_sessions_token ON sessions(token);
@@ -456,6 +561,7 @@ CREATE INDEX idx_magic_links_expires ON magic_links(expires_at);
 CREATE INDEX idx_file_uploads_project ON file_uploads(project_id);
 CREATE INDEX idx_audit_log_entity ON audit_log(entity_type, entity_id);
 CREATE INDEX idx_audit_log_created ON audit_log(created_at);
+CREATE INDEX idx_notification_prefs_email ON notification_preferences(email);
 ```
 
 ---
@@ -478,14 +584,17 @@ cohesion-portal/
 │   │   │   │   ├── DocumentChecklist.tsx  # Main checklist component
 │   │   │   │   ├── CategorySection.tsx    # Single category with documents
 │   │   │   │   ├── DocumentItem.tsx       # Single document row
-│   │   │   │   └── FileUpload.tsx         # Drag-drop file upload
+│   │   │   │   ├── FileUpload.tsx         # Drag-drop file upload
+│   │   │   │   └── NotificationSettings.tsx # Email notification toggles
 │   │   │   ├── admin/
 │   │   │   │   ├── AdminLayout.tsx        # Admin wrapper
 │   │   │   │   ├── Dashboard.tsx          # Admin home
 │   │   │   │   ├── ProjectManager.tsx     # Project list + search
 │   │   │   │   ├── ProjectEditor.tsx      # Edit document statuses
 │   │   │   │   ├── DocumentStatusEditor.tsx # Status dropdown
-│   │   │   │   └── AuditLog.tsx           # Audit log viewer
+│   │   │   │   ├── AuditLog.tsx           # Audit log viewer
+│   │   │   │   ├── NotificationSettings.tsx # Admin notification preferences
+│   │   │   │   └── EmailTemplateSettings.tsx # Email template editor
 │   │   │   └── shared/
 │   │   │       ├── Layout.tsx             # App shell
 │   │   │       ├── StatusBadge.tsx        # Status indicator
@@ -500,7 +609,8 @@ cohesion-portal/
 │   │   │   ├── api.ts                     # Axios instance
 │   │   │   ├── auth.ts                    # Auth API calls
 │   │   │   ├── projects.ts                # Project API calls
-│   │   │   └── files.ts                   # File API calls
+│   │   │   ├── files.ts                   # File API calls
+│   │   │   └── notifications.ts           # Notification preferences & email template API calls
 │   │   ├── types/
 │   │   │   └── index.ts                   # All TypeScript types
 │   │   ├── utils/
@@ -524,12 +634,16 @@ cohesion-portal/
 │   │   │   ├── auth.ts                    # Magic link + session routes
 │   │   │   ├── projects.ts                # Client project routes
 │   │   │   ├── files.ts                   # File upload/download routes
-│   │   │   └── admin.ts                   # Admin routes
+│   │   │   ├── admin.ts                   # Admin routes
+│   │   │   ├── notifications.ts           # User/admin notification preference routes
+│   │   │   └── emailTemplates.ts          # Email template CRUD + test routes
 │   │   ├── services/
 │   │   │   ├── hubspot.ts                 # HubSpot API wrapper
-│   │   │   ├── email.ts                   # Magic link email sending
+│   │   │   ├── email.ts                   # Email sending (Resend) with preference checks
 │   │   │   ├── storage.ts                 # S3/volume file storage
-│   │   │   └── auth.ts                    # JWT/session management
+│   │   │   ├── auth.ts                    # JWT/session management
+│   │   │   ├── settings.ts                # App settings (admin emails)
+│   │   │   └── emailTemplateDefaults.ts   # Default email template content
 │   │   ├── middleware/
 │   │   │   ├── auth.ts                    # JWT verification
 │   │   │   ├── admin.ts                   # Admin auth check

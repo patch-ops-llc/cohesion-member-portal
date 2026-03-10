@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { Search, FolderOpen, ArrowRight, RefreshCw, Mail, CheckSquare, Square, Loader2 } from 'lucide-react';
+import {
+  Search, FolderOpen, ArrowRight, RefreshCw, Mail, CheckSquare, Square, Loader2,
+  KeyRound, ExternalLink, CheckCircle2, XCircle
+} from 'lucide-react';
 import api from '../../services/api';
 import { InlineLoader } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorBoundary';
@@ -36,11 +39,24 @@ interface InviteResponse {
   };
 }
 
+const HUBSPOT_PORTAL_ID = '242796132';
+const HUBSPOT_CUSTOM_OBJECT_TYPE = '2-171216725';
+
+function getHubSpotProjectUrl(projectId: string) {
+  return `https://app-na2.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/${HUBSPOT_CUSTOM_OBJECT_TYPE}/${projectId}`;
+}
+
 export function ProjectManager() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [inviteResults, setInviteResults] = useState<InviteResponse | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{
+    email: string;
+    type: 'reset';
+    status: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   // Debounce search
   const handleSearchChange = (value: string) => {
@@ -72,6 +88,31 @@ export function ProjectManager() {
     onSuccess: (data) => {
       setInviteResults(data);
       setSelectedIds(new Set());
+    }
+  });
+
+  const sendResetMutation = useMutation({
+    mutationFn: async (email: string) => {
+      const response = await api.post<{ success: boolean; message?: string }>('/admin/send-password-reset', { email });
+      return response.data;
+    },
+    onSuccess: (_data, email) => {
+      setActionFeedback({
+        email,
+        type: 'reset',
+        status: 'success',
+        message: `Password reset sent to ${email}`
+      });
+      setTimeout(() => setActionFeedback(null), 5000);
+    },
+    onError: (err, email) => {
+      setActionFeedback({
+        email,
+        type: 'reset',
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Failed to send reset'
+      });
+      setTimeout(() => setActionFeedback(null), 5000);
     }
   });
 
@@ -185,6 +226,30 @@ export function ProjectManager() {
         </div>
       )}
 
+      {/* Action Feedback Banner */}
+      {actionFeedback && (
+        <div
+          className={`rounded-lg p-4 text-sm flex items-center space-x-2 ${
+            actionFeedback.status === 'success'
+              ? 'bg-green-50 border border-green-200 text-green-700'
+              : 'bg-red-50 border border-red-200 text-red-700'
+          }`}
+        >
+          {actionFeedback.status === 'success' ? (
+            <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+          ) : (
+            <XCircle className="h-4 w-4 flex-shrink-0" />
+          )}
+          <span>{actionFeedback.message}</span>
+          <button
+            onClick={() => setActionFeedback(null)}
+            className="ml-auto text-xs opacity-60 hover:opacity-100"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Results */}
       {isLoading ? (
         <InlineLoader message="Loading projects..." />
@@ -233,65 +298,100 @@ export function ProjectManager() {
                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Accepted
                 </th>
-                <th className="px-6 py-3"></th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {projects.map((project) => (
-                <tr
-                  key={project.id}
-                  className={`hover:bg-gray-50 ${selectedIds.has(project.id) ? 'bg-primary-50' : ''}`}
-                >
-                  <td className="px-4 py-4">
-                    <button
-                      onClick={() => toggleSelect(project.id)}
-                      className="text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      {selectedIds.has(project.id) ? (
-                        <CheckSquare className="h-5 w-5 text-primary" />
+              {projects.map((project) => {
+                const isResetLoading = sendResetMutation.isPending && sendResetMutation.variables === project.email;
+
+                return (
+                  <tr
+                    key={project.id}
+                    className={`hover:bg-gray-50 ${selectedIds.has(project.id) ? 'bg-primary-50' : ''}`}
+                  >
+                    <td className="px-4 py-4">
+                      <button
+                        onClick={() => toggleSelect(project.id)}
+                        className="text-gray-400 hover:text-gray-600 transition-colors"
+                      >
+                        {selectedIds.has(project.id) ? (
+                          <CheckSquare className="h-5 w-5 text-primary" />
+                        ) : (
+                          <Square className="h-5 w-5" />
+                        )}
+                      </button>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-medium text-gray-900">{project.name}</span>
+                        <a
+                          href={getHubSpotProjectUrl(project.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-gray-400 hover:text-primary transition-colors"
+                          title="Open in HubSpot"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-500">
+                      {project.email}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      <span className="text-gray-900">{project.stats.totalDocs}</span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      {project.stats.pendingDocs > 0 ? (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-700">
+                          {project.stats.pendingDocs}
+                        </span>
                       ) : (
-                        <Square className="h-5 w-5" />
+                        <span className="text-gray-400">0</span>
                       )}
-                    </button>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="font-medium text-gray-900">{project.name}</span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-500">
-                    {project.email}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <span className="text-gray-900">{project.stats.totalDocs}</span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    {project.stats.pendingDocs > 0 ? (
-                      <span className="px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-700">
-                        {project.stats.pendingDocs}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">0</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    {project.stats.acceptedDocs > 0 ? (
-                      <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
-                        {project.stats.acceptedDocs}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">0</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <Link
-                      to={`/admin/projects/${project.id}`}
-                      className="text-primary hover:text-primary-800 flex items-center justify-end space-x-1"
-                    >
-                      <span>View</span>
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      {project.stats.acceptedDocs > 0 ? (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
+                          {project.stats.acceptedDocs}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">0</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <div className="flex items-center justify-end space-x-2">
+                        {project.email && (
+                          <button
+                            onClick={() => sendResetMutation.mutate(project.email)}
+                            disabled={isResetLoading}
+                            className="inline-flex items-center space-x-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                            title="Send password reset"
+                          >
+                            {isResetLoading ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <KeyRound className="h-3.5 w-3.5" />
+                            )}
+                            <span>Reset PW</span>
+                          </button>
+                        )}
+                        <Link
+                          to={`/admin/projects/${project.id}`}
+                          className="inline-flex items-center space-x-1 px-3 py-1.5 text-xs font-medium rounded-lg text-primary hover:bg-primary-50 transition-colors"
+                        >
+                          <span>View</span>
+                          <ArrowRight className="h-4 w-4" />
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
