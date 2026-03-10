@@ -5,7 +5,6 @@ import {
   FolderOpen, 
   FileText, 
   Bell,
-  Users,
   Mail,
   LogOut, 
   Menu, 
@@ -21,7 +20,6 @@ interface AdminLayoutProps {
 const navItems = [
   { path: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true },
   { path: '/admin/projects', icon: FolderOpen, label: 'Projects' },
-  { path: '/admin/contacts', icon: Users, label: 'Clients' },
   { path: '/admin/audit-log', icon: FileText, label: 'Audit Log' },
   { path: '/admin/notifications', icon: Bell, label: 'Notifications' },
   { path: '/admin/email-templates', icon: Mail, label: 'Email Templates' }

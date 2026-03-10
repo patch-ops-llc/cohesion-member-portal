@@ -26,7 +26,6 @@ import { Dashboard } from './components/admin/Dashboard';
 import { ProjectManager } from './components/admin/ProjectManager';
 import { ProjectEditor } from './components/admin/ProjectEditor';
 import { AuditLog } from './components/admin/AuditLog';
-import { ContactManager } from './components/admin/ContactManager';
 import { AdminNotificationSettings } from './components/admin/NotificationSettings';
 import { EmailTemplateSettings } from './components/admin/EmailTemplateSettings';
 
@@ -120,14 +119,6 @@ function App() {
                 element={
                   <AdminRoute>
                     <ProjectEditor />
-                  </AdminRoute>
-                }
-              />
-              <Route
-                path="/admin/contacts"
-                element={
-                  <AdminRoute>
-                    <ContactManager />
                   </AdminRoute>
                 }
               />

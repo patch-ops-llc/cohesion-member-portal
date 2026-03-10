@@ -356,6 +356,100 @@ export async function getAllContacts(limit: number = 100, after?: string): Promi
   }
 }
 
+// Search contacts by query string (uses HubSpot search API)
+export async function searchContacts(query: string, limit: number = 10): Promise<ContactInfo[]> {
+  try {
+    const response = await axios.post<{
+      results?: Array<{
+        id: string;
+        properties: {
+          email?: string;
+          firstname?: string;
+          lastname?: string;
+          createdate?: string;
+          lastmodifieddate?: string;
+        };
+      }>;
+    }>(
+      'https://api.hubapi.com/crm/v3/objects/contacts/search',
+      {
+        query,
+        properties: ['email', 'firstname', 'lastname', 'createdate', 'lastmodifieddate'],
+        limit
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return (response.data?.results || [])
+      .filter(c => c.properties.email)
+      .map(c => ({
+        id: c.id,
+        email: c.properties.email!,
+        firstName: c.properties.firstname?.trim() || undefined,
+        lastName: c.properties.lastname?.trim() || undefined,
+        createDate: c.properties.createdate || undefined,
+        lastModifiedDate: c.properties.lastmodifieddate || undefined,
+      }));
+  } catch (error) {
+    logger.error('Failed to search contacts in HubSpot', { query, error: String(error) });
+    throw error;
+  }
+}
+
+// Create a new p_client_projects record in HubSpot
+export async function createProject(properties: {
+  client_project_name: string;
+  email: string;
+}): Promise<Project> {
+  try {
+    const defaultDocumentData: DocumentData = {
+      _meta: { selectedSections: ['personal'] }
+    };
+
+    const response = await hubspotClient.crm.objects.basicApi.create(
+      CUSTOM_OBJECT_TYPE,
+      {
+        properties: {
+          client_project_name: properties.client_project_name,
+          email: properties.email.toLowerCase().trim(),
+          document_data: JSON.stringify(defaultDocumentData)
+        }
+      }
+    );
+
+    logger.info('Created project in HubSpot', { projectId: response.id, name: properties.client_project_name });
+
+    return {
+      id: response.id,
+      properties: response.properties as unknown as ProjectProperties
+    };
+  } catch (error) {
+    logger.error('Failed to create project in HubSpot', { properties, error: String(error) });
+    throw error;
+  }
+}
+
+// Associate a project with a HubSpot contact
+export async function associateProjectWithContact(projectId: string, contactId: string): Promise<void> {
+  try {
+    await hubspotClient.crm.objects.associationsApi.create(
+      CUSTOM_OBJECT_TYPE,
+      projectId,
+      'contacts',
+      contactId,
+      [{ associationCategory: 'HUBSPOT_DEFINED' as any, associationTypeId: 279 }]
+    );
+    logger.info('Associated project with contact', { projectId, contactId });
+  } catch (error) {
+    logger.warn('Failed to associate project with contact (non-fatal)', { projectId, contactId, error: String(error) });
+  }
+}
+
 // Parse document_data safely
 export function parseDocumentData(documentDataStr: string | null | undefined): DocumentData {
   if (!documentDataStr) {

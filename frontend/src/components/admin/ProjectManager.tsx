@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Search, FolderOpen, ArrowRight, RefreshCw, Mail, CheckSquare, Square, Loader2,
-  KeyRound, ExternalLink, CheckCircle2, XCircle
+  KeyRound, ExternalLink, CheckCircle2, XCircle, Plus, X, UserSearch
 } from 'lucide-react';
 import api from '../../services/api';
 import { InlineLoader } from '../shared/LoadingSpinner';
@@ -19,6 +19,13 @@ interface AdminProject {
     pendingDocs: number;
     acceptedDocs: number;
   };
+}
+
+interface ContactSearchResult {
+  id: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
 }
 
 interface InviteResult {
@@ -46,19 +53,191 @@ function getHubSpotProjectUrl(projectId: string) {
   return `https://app-na2.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/${HUBSPOT_CUSTOM_OBJECT_TYPE}/${projectId}`;
 }
 
+function CreateProjectModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [contactQuery, setContactQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [selectedContact, setSelectedContact] = useState<ContactSearchResult | null>(null);
+  const [projectName, setProjectName] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const queryClient = useQueryClient();
+
+  const handleQueryChange = useCallback((value: string) => {
+    setContactQuery(value);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedQuery(value), 300);
+  }, []);
+
+  useEffect(() => {
+    return () => clearTimeout(debounceRef.current);
+  }, []);
+
+  const { data: searchResults, isLoading: searchLoading } = useQuery({
+    queryKey: ['admin', 'contacts', 'search', debouncedQuery],
+    queryFn: async () => {
+      const response = await api.get<{ success: boolean; contacts: ContactSearchResult[] }>(
+        `/admin/contacts/search?q=${encodeURIComponent(debouncedQuery)}`
+      );
+      return response.data.contacts;
+    },
+    enabled: debouncedQuery.length >= 2 && !selectedContact
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedContact) throw new Error('No contact selected');
+      const response = await api.post<{ success: boolean; project: { id: string } }>('/admin/projects', {
+        contactId: selectedContact.id,
+        contactEmail: selectedContact.email,
+        projectName: projectName.trim()
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+      onCreated();
+    }
+  });
+
+  const selectContact = (contact: ContactSearchResult) => {
+    setSelectedContact(contact);
+    setContactQuery('');
+    setDebouncedQuery('');
+    const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ');
+    if (name && !projectName) {
+      setProjectName(name);
+    }
+  };
+
+  const clearContact = () => {
+    setSelectedContact(null);
+    setProjectName('');
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">New Project</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Contact Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">HubSpot Contact</label>
+            {selectedContact ? (
+              <div className="flex items-center justify-between bg-primary-50 border border-primary-200 rounded-lg px-4 py-3">
+                <div>
+                  <span className="font-medium text-gray-900">
+                    {[selectedContact.firstName, selectedContact.lastName].filter(Boolean).join(' ') || 'No name'}
+                  </span>
+                  <span className="text-gray-500 ml-2 text-sm">{selectedContact.email}</span>
+                </div>
+                <button onClick={clearContact} className="text-gray-400 hover:text-gray-600 transition-colors">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <UserSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <input
+                  type="text"
+                  value={contactQuery}
+                  onChange={(e) => handleQueryChange(e.target.value)}
+                  placeholder="Search contacts by name or email..."
+                  className="input pl-10"
+                  autoFocus
+                />
+                {/* Search Results Dropdown */}
+                {debouncedQuery.length >= 2 && (
+                  <div className="absolute z-10 mt-1 w-full bg-white rounded-lg shadow-lg border border-gray-200 max-h-60 overflow-y-auto">
+                    {searchLoading ? (
+                      <div className="px-4 py-3 text-sm text-gray-500 flex items-center space-x-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Searching HubSpot...</span>
+                      </div>
+                    ) : searchResults && searchResults.length > 0 ? (
+                      searchResults.map(contact => {
+                        const displayName = [contact.firstName, contact.lastName].filter(Boolean).join(' ');
+                        return (
+                          <button
+                            key={contact.id}
+                            onClick={() => selectContact(contact)}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-b-0"
+                          >
+                            <div className="font-medium text-gray-900">
+                              {displayName || <span className="italic text-gray-400">No name</span>}
+                            </div>
+                            <div className="text-sm text-gray-500">{contact.email}</div>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="px-4 py-3 text-sm text-gray-500">No contacts found</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Project Name */}
+          {selectedContact && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Project Name</label>
+              <input
+                type="text"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g. John Smith 2026 Tax Return"
+                className="input"
+              />
+            </div>
+          )}
+
+          {/* Error */}
+          {createMutation.isError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">
+              {createMutation.error instanceof Error ? createMutation.error.message : 'Failed to create project'}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl">
+          <button onClick={onClose} className="btn-ghost">Cancel</button>
+          <button
+            onClick={() => createMutation.mutate()}
+            disabled={!selectedContact || !projectName.trim() || createMutation.isPending}
+            className="btn-primary flex items-center space-x-2"
+          >
+            {createMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+            <span>Create Project</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ProjectManager() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [inviteResults, setInviteResults] = useState<InviteResponse | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<{
     email: string;
-    type: 'reset';
+    type: 'reset' | 'created';
     status: 'success' | 'error';
     message: string;
   } | null>(null);
 
-  // Debounce search
   const handleSearchChange = (value: string) => {
     setSearch(value);
     setTimeout(() => setDebouncedSearch(value), 300);
@@ -141,6 +320,17 @@ export function ProjectManager() {
   const allSelected = projects.length > 0 && selectedIds.size === projects.length;
   const someSelected = selectedIds.size > 0;
 
+  const handleProjectCreated = () => {
+    setShowCreateModal(false);
+    setActionFeedback({
+      email: '',
+      type: 'created',
+      status: 'success',
+      message: 'Project created successfully'
+    });
+    setTimeout(() => setActionFeedback(null), 5000);
+  };
+
   return (
     <div className="space-y-6">
       {/* Search + Actions */}
@@ -156,6 +346,13 @@ export function ProjectManager() {
           />
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="btn-primary flex items-center space-x-2"
+          >
+            <Plus className="h-4 w-4" />
+            <span>New Project</span>
+          </button>
           {someSelected && (
             <button
               onClick={() => sendInvitesMutation.mutate(Array.from(selectedIds))}
@@ -167,7 +364,7 @@ export function ProjectManager() {
               ) : (
                 <Mail className="h-4 w-4" />
               )}
-              <span>Send Registration Invites ({selectedIds.size})</span>
+              <span>Send Invites ({selectedIds.size})</span>
             </button>
           )}
           <button
@@ -179,6 +376,14 @@ export function ProjectManager() {
           </button>
         </div>
       </div>
+
+      {/* Create Project Modal */}
+      {showCreateModal && (
+        <CreateProjectModal
+          onClose={() => setShowCreateModal(false)}
+          onCreated={handleProjectCreated}
+        />
+      )}
 
       {/* Invite Results Banner */}
       {inviteResults && (
@@ -261,9 +466,18 @@ export function ProjectManager() {
       ) : !projects.length ? (
         <div className="text-center py-12">
           <FolderOpen className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500">
+          <p className="text-gray-500 mb-4">
             {search ? 'No projects match your search' : 'No projects found'}
           </p>
+          {!search && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="btn-primary inline-flex items-center space-x-2"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Create your first project</span>
+            </button>
+          )}
         </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">

@@ -288,50 +288,74 @@ router.get('/stats', async (req, res, next) => {
   }
 });
 
-// GET /api/admin/contacts - List all HubSpot contacts
-router.get('/contacts', async (req, res, next) => {
+// GET /api/admin/contacts/search - Search HubSpot contacts by query
+router.get('/contacts/search', async (req, res, next) => {
   try {
-    const { search, limit = '100' } = req.query;
-    const limitNum = Math.min(parseInt(limit as string), 200);
+    const { q, limit = '10' } = req.query;
 
-    const result = await hubspot.getAllContacts(limitNum);
-
-    let contacts = result.contacts;
-
-    // Apply search filter if provided
-    if (search && typeof search === 'string') {
-      const searchLower = search.toLowerCase();
-      contacts = contacts.filter(c =>
-        c.email?.toLowerCase().includes(searchLower) ||
-        c.firstName?.toLowerCase().includes(searchLower) ||
-        c.lastName?.toLowerCase().includes(searchLower)
-      );
+    if (!q || typeof q !== 'string' || q.trim().length < 2) {
+      return res.json({ success: true, contacts: [] });
     }
 
-    // Check registration status for each contact
-    const contactsWithStatus = await Promise.all(
-      contacts.map(async (contact) => {
-        const user = await prisma.user.findUnique({
-          where: { email: contact.email.toLowerCase().trim() }
-        });
-        return {
-          ...contact,
-          isRegistered: !!user,
-          lastLoginAt: user?.lastLoginAt?.toISOString() || null
-        };
-      })
-    );
-
-    logger.info('Admin contacts fetched', { count: contactsWithStatus.length });
+    const limitNum = Math.min(parseInt(limit as string), 25);
+    const contacts = await hubspot.searchContacts(q.trim(), limitNum);
 
     res.json({
       success: true,
-      contacts: contactsWithStatus,
-      total: contactsWithStatus.length,
-      hasMore: !!result.paging?.next?.after
+      contacts
     });
   } catch (error) {
     next(error);
+  }
+});
+
+// POST /api/admin/projects - Create a new project from a HubSpot contact
+router.post('/projects', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      contactId: z.string().min(1),
+      contactEmail: z.string().email(),
+      projectName: z.string().min(1, 'Project name is required').max(200)
+    });
+
+    const { contactId, contactEmail, projectName } = schema.parse(req.body);
+
+    const project = await hubspot.createProject({
+      client_project_name: projectName,
+      email: contactEmail
+    });
+
+    await hubspot.associateProjectWithContact(project.id, contactId);
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_create_project',
+        entityType: 'project',
+        entityId: project.id,
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { contactId, contactEmail, projectName },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin created project', { projectId: project.id, contactEmail, projectName });
+
+    res.status(201).json({
+      success: true,
+      project: {
+        id: project.id,
+        name: projectName,
+        email: contactEmail
+      }
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError(error.errors[0]?.message || 'Invalid request', 400));
+    } else {
+      next(error);
+    }
   }
 });
 
