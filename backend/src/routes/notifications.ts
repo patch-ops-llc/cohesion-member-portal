@@ -113,17 +113,21 @@ router.put('/admin/emails', adminMiddleware, async (req, res, next) => {
 
 // ─── Admin notification preferences ───────────────────────────────────
 
+const uploadDigestSchema = z.enum(['none', 'daily', 'weekly']);
+
 const adminPreferencesSchema = z.object({
   email: z.string().email(),
   adminRegistration: z.boolean().optional(),
   adminDocumentSubmission: z.boolean().optional(),
-  adminWeeklyUpdate: z.boolean().optional()
+  adminWeeklyUpdate: z.boolean().optional(),
+  adminUploadDigest: uploadDigestSchema.optional()
 });
 
 const adminBulkPreferencesSchema = z.object({
   adminRegistration: z.boolean().optional(),
   adminDocumentSubmission: z.boolean().optional(),
-  adminWeeklyUpdate: z.boolean().optional()
+  adminWeeklyUpdate: z.boolean().optional(),
+  adminUploadDigest: uploadDigestSchema.optional()
 });
 
 // GET /api/notifications/admin/preferences - Get admin notification preferences
@@ -147,7 +151,8 @@ router.get('/admin/preferences', adminMiddleware, async (_req, res, next) => {
           email: prefs.email,
           adminRegistration: prefs.adminRegistration,
           adminDocumentSubmission: prefs.adminDocumentSubmission,
-          adminWeeklyUpdate: prefs.adminWeeklyUpdate
+          adminWeeklyUpdate: prefs.adminWeeklyUpdate,
+          adminUploadDigest: prefs.adminUploadDigest
         };
       })
     );
@@ -182,7 +187,8 @@ router.patch('/admin/preferences', adminMiddleware, async (req, res, next) => {
         email: prefs.email,
         adminRegistration: prefs.adminRegistration,
         adminDocumentSubmission: prefs.adminDocumentSubmission,
-        adminWeeklyUpdate: prefs.adminWeeklyUpdate
+        adminWeeklyUpdate: prefs.adminWeeklyUpdate,
+        adminUploadDigest: prefs.adminUploadDigest
       }
     });
   } catch (error) {
@@ -212,7 +218,8 @@ router.patch('/admin/preferences/bulk', adminMiddleware, async (req, res, next) 
           email: prefs.email,
           adminRegistration: prefs.adminRegistration,
           adminDocumentSubmission: prefs.adminDocumentSubmission,
-          adminWeeklyUpdate: prefs.adminWeeklyUpdate
+          adminWeeklyUpdate: prefs.adminWeeklyUpdate,
+          adminUploadDigest: prefs.adminUploadDigest
         };
       })
     );
@@ -259,7 +266,8 @@ router.get('/cards/preferences/:email', async (req, res, next) => {
         weeklyUpdate: prefs.weeklyUpdate,
         adminRegistration: prefs.adminRegistration,
         adminDocumentSubmission: prefs.adminDocumentSubmission,
-        adminWeeklyUpdate: prefs.adminWeeklyUpdate
+        adminWeeklyUpdate: prefs.adminWeeklyUpdate,
+        adminUploadDigest: prefs.adminUploadDigest
       }
     });
   } catch (error) {
@@ -279,7 +287,8 @@ router.patch('/cards/preferences/:email', async (req, res, next) => {
       weeklyUpdate: z.boolean().optional(),
       adminRegistration: z.boolean().optional(),
       adminDocumentSubmission: z.boolean().optional(),
-      adminWeeklyUpdate: z.boolean().optional()
+      adminWeeklyUpdate: z.boolean().optional(),
+      adminUploadDigest: uploadDigestSchema.optional()
     });
 
     const updates = schema.parse(req.body);
@@ -302,7 +311,8 @@ router.patch('/cards/preferences/:email', async (req, res, next) => {
         weeklyUpdate: prefs.weeklyUpdate,
         adminRegistration: prefs.adminRegistration,
         adminDocumentSubmission: prefs.adminDocumentSubmission,
-        adminWeeklyUpdate: prefs.adminWeeklyUpdate
+        adminWeeklyUpdate: prefs.adminWeeklyUpdate,
+        adminUploadDigest: prefs.adminUploadDigest
       }
     });
   } catch (error) {
@@ -340,6 +350,8 @@ router.post('/cards/resend/:email', async (req, res, _next) => {
       return res.status(400).json({ success: false, error: 'Invalid request: type must be "passwordReset" or "portalRegistration"' });
     }
 
+    const ccEmails = await hubspot.getCcEmailsForUser(email);
+
     if (type === 'passwordReset') {
       // Find user in DB
       const user = await prisma.user.findUnique({ where: { email } });
@@ -355,7 +367,6 @@ router.post('/cards/resend/:email', async (req, res, _next) => {
         });
       } catch (dbErr) {
         logger.error('Failed to invalidate existing password reset tokens', { email, error: String(dbErr) });
-        // Non-critical — continue to create a new token
       }
 
       const token = crypto.randomBytes(32).toString('hex');
@@ -373,7 +384,7 @@ router.post('/cards/resend/:email', async (req, res, _next) => {
       }
 
       try {
-        await emailService.sendPasswordResetEmail(email, token);
+        await emailService.sendPasswordResetEmail(email, token, ccEmails);
       } catch (emailErr) {
         logger.error('Failed to send password reset email', { email, error: String(emailErr) });
         return res.status(500).json({ success: false, error: 'Failed to send password reset email. Please check email service configuration.' });
@@ -393,11 +404,10 @@ router.post('/cards/resend/:email', async (req, res, _next) => {
         }
       } catch (hsErr) {
         logger.warn('Could not fetch contact name from HubSpot, using email as display name', { email, error: String(hsErr) });
-        // Non-critical — fall through with email as display name
       }
 
       try {
-        await emailService.sendRegistrationEmail(email, displayName);
+        await emailService.sendRegistrationEmail(email, displayName, ccEmails);
       } catch (emailErr) {
         logger.error('Failed to send registration email', { email, error: String(emailErr) });
         return res.status(500).json({ success: false, error: 'Failed to send registration email. Please check email service configuration.' });

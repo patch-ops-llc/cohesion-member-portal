@@ -155,8 +155,12 @@ router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (
     const contact = await hubspot.findContactByEmail(normalizedEmail);
     const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || normalizedEmail;
 
+    const ccAddrs = project.properties.cc_email?.trim()
+      ? project.properties.cc_email.split(/[,;]\s*/).map(e => e.trim().toLowerCase()).filter(e => e && e !== normalizedEmail)
+      : [];
+
     emailService.sendDocumentSubmissionEmail(
-      normalizedEmail, displayName, projectName, categoryLabel, documentName, file.originalname
+      normalizedEmail, displayName, projectName, categoryLabel, documentName, file.originalname, ccAddrs
     ).catch(err => logger.error('Failed to send document submission email', { error: String(err) }));
 
     emailService.sendAdminDocumentSubmissionNotification(

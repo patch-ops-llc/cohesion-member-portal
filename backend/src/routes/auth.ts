@@ -113,8 +113,11 @@ router.post('/register', async (req, res, next) => {
 
     logger.info('User registered', { email: normalizedEmail, userId: user.id });
 
+    // Fetch CC emails from projects (non-blocking lookup, but needed before send)
+    const ccEmails = await hubspot.getCcEmailsForUser(normalizedEmail);
+
     // Send registration emails (non-blocking)
-    emailService.sendRegistrationEmail(normalizedEmail, displayName).catch(err =>
+    emailService.sendRegistrationEmail(normalizedEmail, displayName, ccEmails).catch(err =>
       logger.error('Failed to send registration email', { email: normalizedEmail, error: String(err) })
     );
     emailService.sendAdminRegistrationNotification(normalizedEmail, displayName).catch(err =>
@@ -222,12 +225,13 @@ router.post('/forgot-password', async (req, res, next) => {
       });
     }
 
+    const ccEmails = await hubspot.getCcEmailsForUser(normalizedEmail);
+
     const existingToken = await prisma.passwordResetToken.findFirst({
       where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } }
     });
     if (existingToken) {
-      // Don't create duplicate - could send same email again for UX
-      await emailService.sendPasswordResetEmail(user.email, existingToken.token);
+      await emailService.sendPasswordResetEmail(user.email, existingToken.token, ccEmails);
       return res.json({
         success: true,
         message: 'If an account exists with this email, you will receive a password reset link.'
@@ -243,7 +247,7 @@ router.post('/forgot-password', async (req, res, next) => {
       }
     });
 
-    await emailService.sendPasswordResetEmail(user.email, token);
+    await emailService.sendPasswordResetEmail(user.email, token, ccEmails);
 
     logger.info('Password reset token created', { email: normalizedEmail });
 

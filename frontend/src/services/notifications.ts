@@ -52,6 +52,15 @@ export async function updateAdminPreferencesBulk(
   return data.preferences;
 }
 
+// ─── Upload digest ────────────────────────────────────────────────────
+
+export async function triggerUploadDigest(
+  frequency: 'daily' | 'weekly'
+): Promise<{ sent: number; skipped: boolean; message: string }> {
+  const { data } = await api.post('/admin/upload-digest/send', { frequency });
+  return data;
+}
+
 // ─── Email templates ──────────────────────────────────────────────────
 
 export async function getEmailTemplates(): Promise<EmailTemplate[]> {

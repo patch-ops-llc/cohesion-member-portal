@@ -124,12 +124,16 @@ export interface UserNotificationPreferences {
   weeklyUpdate: boolean;
 }
 
+// Upload digest frequency
+export type UploadDigestFrequency = 'none' | 'daily' | 'weekly';
+
 // Notification preferences (admin-facing)
 export interface AdminNotificationPreferences {
   email: string;
   adminRegistration: boolean;
   adminDocumentSubmission: boolean;
   adminWeeklyUpdate: boolean;
+  adminUploadDigest: UploadDigestFrequency;
 }
 
 // Email template

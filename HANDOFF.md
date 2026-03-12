@@ -268,6 +268,8 @@ const advisoryStageLabels: Record<string, string> = {
 |---------|-------------|----------|
 | Staff Auth | HubSpot OAuth or API key authentication | P0 |
 | Project Search | Search/filter all projects | P0 |
+| Documents Pending Review | Count of documents with `pending_review` status across all projects | P0 |
+| All Documents Submitted | Count of projects where every document has been submitted (no `not_submitted` remaining) | P0 |
 | Section Toggle | Switch between Personal/Entity document types | P0 |
 | Category Management | Toggle categories on/off | P0 |
 | Document Status Update | Accept, reject, request resubmission | P0 |

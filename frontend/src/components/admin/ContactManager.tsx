@@ -21,7 +21,7 @@ interface AdminContact {
 
 interface BulkInviteResult {
   email: string;
-  status: 'sent' | 'already_registered' | 'error';
+  status: 'sent' | 'already_registered' | 'duplicate_skipped' | 'error';
   error?: string;
 }
 
@@ -32,6 +32,7 @@ interface BulkInviteResponse {
     total: number;
     sent: number;
     alreadyRegistered: number;
+    duplicateSkipped: number;
     errors: number;
   };
 }
@@ -230,6 +231,11 @@ export function ContactManager() {
                 {inviteResults.summary.alreadyRegistered > 0 && (
                   <span className="px-2 py-1 rounded-full bg-blue-100 text-blue-700 font-medium">
                     {inviteResults.summary.alreadyRegistered} already registered
+                  </span>
+                )}
+                {inviteResults.summary.duplicateSkipped > 0 && (
+                  <span className="px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 font-medium">
+                    {inviteResults.summary.duplicateSkipped} duplicate{inviteResults.summary.duplicateSkipped !== 1 ? 's' : ''} skipped
                   </span>
                 )}
                 {inviteResults.summary.errors > 0 && (

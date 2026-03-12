@@ -13,6 +13,7 @@ import notificationRoutes from './routes/notifications';
 import emailTemplateRoutes from './routes/emailTemplates';
 import { errorHandler } from './middleware/errorHandler';
 import { logger } from './utils/logger';
+import { startScheduler } from './services/scheduler';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -96,6 +97,7 @@ app.use(errorHandler);
 app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  startScheduler();
 });
 
 export default app;

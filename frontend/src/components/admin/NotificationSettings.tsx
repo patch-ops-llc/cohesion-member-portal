@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Bell, Check, AlertCircle, Mail, Plus, X, Save } from 'lucide-react';
+import { Bell, Check, AlertCircle, Mail, Plus, X, Save, Send, Calendar } from 'lucide-react';
 import {
   getAdminEmails,
   setAdminEmails,
   getAdminPreferences,
   updateAdminPreference,
-  updateAdminPreferencesBulk
+  updateAdminPreferencesBulk,
+  triggerUploadDigest
 } from '../../services/notifications';
-import type { AdminNotificationPreferences } from '../../types';
+import type { AdminNotificationPreferences, UploadDigestFrequency } from '../../types';
 
 interface ToggleProps {
   enabled: boolean;
@@ -63,6 +64,7 @@ export function AdminNotificationSettings() {
   const [newEmail, setNewEmail] = useState('');
   const [emailsSaving, setEmailsSaving] = useState(false);
   const [emailsDirty, setEmailsDirty] = useState(false);
+  const [digestSending, setDigestSending] = useState<string | null>(null);
 
   useEffect(() => {
     loadAll();
@@ -179,6 +181,64 @@ export function AdminNotificationSettings() {
       setError(err instanceof Error ? err.message : 'Failed to update preferences');
     } finally {
       setSaving(null);
+    }
+  };
+
+  const handleDigestChange = async (email: string, value: UploadDigestFrequency) => {
+    const savingKey = `${email}:adminUploadDigest`;
+    setSaving(savingKey);
+    setError(null);
+
+    const prevValue = preferences.find(p => p.email === email)?.adminUploadDigest;
+    setPreferences(prev =>
+      prev.map(p => p.email === email ? { ...p, adminUploadDigest: value } : p)
+    );
+
+    try {
+      await updateAdminPreference(email, { adminUploadDigest: value });
+      setSuccessMessage(`Upload digest set to "${value}" for ${email}`);
+      setTimeout(() => setSuccessMessage(null), 2000);
+    } catch (err) {
+      setPreferences(prev =>
+        prev.map(p => p.email === email ? { ...p, adminUploadDigest: prevValue || 'none' } : p)
+      );
+      setError(err instanceof Error ? err.message : 'Failed to update digest preference');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleBulkDigestChange = async (value: UploadDigestFrequency) => {
+    setSaving('bulk:adminUploadDigest');
+    setError(null);
+
+    const prevPrefs = [...preferences];
+    setPreferences(prev => prev.map(p => ({ ...p, adminUploadDigest: value })));
+
+    try {
+      const updated = await updateAdminPreferencesBulk({ adminUploadDigest: value });
+      setPreferences(updated);
+      setSuccessMessage(`All admin upload digests set to "${value}"`);
+      setTimeout(() => setSuccessMessage(null), 2000);
+    } catch (err) {
+      setPreferences(prevPrefs);
+      setError(err instanceof Error ? err.message : 'Failed to update digest preferences');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleSendDigest = async (frequency: 'daily' | 'weekly') => {
+    setDigestSending(frequency);
+    setError(null);
+    try {
+      const result = await triggerUploadDigest(frequency);
+      setSuccessMessage(result.message);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send digest');
+    } finally {
+      setDigestSending(null);
     }
   };
 
@@ -354,6 +414,94 @@ export function AdminNotificationSettings() {
               </div>
             </div>
           )}
+
+          {/* Upload Digest Settings */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+            <div className="px-5 py-4 border-b border-gray-100">
+              <div className="flex items-center space-x-2">
+                <Calendar className="h-4 w-4 text-primary" />
+                <h3 className="font-semibold text-gray-900">Upload Digest</h3>
+              </div>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Receive a summary of all documents uploaded across projects, grouped by project with file details and links
+              </p>
+            </div>
+
+            {/* Bulk frequency selector */}
+            <div className="p-5 border-b border-gray-100">
+              <div className="flex items-center justify-between">
+                <div className="flex-1 mr-4">
+                  <h4 className="text-sm font-semibold text-gray-900">Set All Admins</h4>
+                  <p className="text-sm text-gray-500 mt-0.5">Set digest frequency for all admin emails at once</p>
+                </div>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) handleBulkDigestChange(e.target.value as UploadDigestFrequency);
+                  }}
+                  disabled={saving === 'bulk:adminUploadDigest'}
+                  className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary bg-white"
+                >
+                  <option value="" disabled>Choose...</option>
+                  <option value="none">Off</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Per-email digest frequency */}
+            <div className="divide-y divide-gray-100">
+              {preferences.map(pref => (
+                <div key={pref.email} className="flex items-center justify-between p-5">
+                  <div className="flex items-center space-x-2 min-w-0 flex-1 mr-4">
+                    <Mail className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                    <span className="text-sm text-gray-700 truncate">{pref.email}</span>
+                  </div>
+                  <select
+                    value={pref.adminUploadDigest || 'none'}
+                    onChange={(e) => handleDigestChange(pref.email, e.target.value as UploadDigestFrequency)}
+                    disabled={saving === `${pref.email}:adminUploadDigest`}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary bg-white"
+                  >
+                    <option value="none">Off</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            {/* Manual send */}
+            <div className="px-5 py-4 border-t border-gray-100 bg-gray-50 rounded-b-xl">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-900">Send Now</h4>
+                  <p className="text-xs text-gray-500 mt-0.5">Manually trigger a digest email to all opted-in admins</p>
+                </div>
+                <div className="flex space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSendDigest('daily')}
+                    disabled={!!digestSending}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 text-sm border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    <span>{digestSending === 'daily' ? 'Sending...' : 'Daily (24h)'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendDigest('weekly')}
+                    disabled={!!digestSending}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 text-sm border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    <span>{digestSending === 'weekly' ? 'Sending...' : 'Weekly (7d)'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </>
       )}
     </div>

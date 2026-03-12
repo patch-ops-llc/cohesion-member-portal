@@ -76,6 +76,7 @@ model NotificationPreference {
   adminRegistration    Boolean @default(true) @map("admin_registration")
   adminDocumentSubmission Boolean @default(true) @map("admin_document_submission")
   adminWeeklyUpdate    Boolean @default(true) @map("admin_weekly_update")
+  adminUploadDigest    String  @default("none") @map("admin_upload_digest") // 'none' | 'daily' | 'weekly'
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 

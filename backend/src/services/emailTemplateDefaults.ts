@@ -173,5 +173,22 @@ export const DEFAULT_TEMPLATES: TemplateDefault[] = [
   <a href="{{adminUrl}}" class="btn">Open Admin Dashboard</a>
 </p>`,
     variables: ['totalProjects', 'activeProjects', 'totalPending', 'totalAccepted', 'newRegistrations', 'newUploads', 'adminUrl']
+  },
+  {
+    key: 'adminUploadDigest',
+    label: 'Upload Digest (Admin)',
+    senderName: FROM_NAME,
+    senderEmail: FROM_EMAIL,
+    subject: '{{frequency}} Upload Digest - {{uploadCount}} New Documents',
+    body: `<p>Here's your {{frequencyLower}} upload digest for the Cohesion Document Portal:</p>
+<p style="font-size: 14px; color: #555;">
+  <strong>{{uploadCount}}</strong> document(s) uploaded across <strong>{{projectCount}}</strong> project(s) in the last {{periodLabel}}.
+</p>
+{{projectSections}}
+<p style="text-align: center; margin-top: 24px;">
+  <a href="{{adminUrl}}" class="btn">Open Admin Dashboard</a>
+</p>
+<p style="font-size: 12px; color: #999;">You can manage your digest frequency in admin notification settings.</p>`,
+    variables: ['frequency', 'frequencyLower', 'uploadCount', 'projectCount', 'periodLabel', 'projectSections', 'adminUrl']
   }
 ];

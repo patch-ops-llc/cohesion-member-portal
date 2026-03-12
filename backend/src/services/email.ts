@@ -144,41 +144,48 @@ async function getAdminRecipientsFor(type: string): Promise<string[]> {
 }
 
 // ─── Core send function ────────────────────────────────────────────────
-async function sendEmail(to: string | string[], subject: string, html: string, senderName?: string, senderEmail?: string): Promise<void> {
+async function sendEmail(to: string | string[], subject: string, html: string, senderName?: string, senderEmail?: string, cc?: string | string[]): Promise<void> {
   const recipients = Array.isArray(to) ? to : [to];
   if (recipients.length === 0) return;
 
   const name = senderName || fromName;
   const email = senderEmail || fromEmail;
 
+  const ccRecipients = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : [];
+
   try {
     const resend = getResend();
     if (!resend) {
-      logger.warn('Resend not configured - email would be sent', { to: recipients, subject });
+      logger.warn('Resend not configured - email would be sent', { to: recipients, cc: ccRecipients, subject });
       return;
     }
 
-    const { data, error } = await resend.emails.send({
+    const payload: Parameters<typeof resend.emails.send>[0] = {
       from: `${name} <${email}>`,
       to: recipients,
       subject,
       html
-    });
+    };
+    if (ccRecipients.length > 0) {
+      payload.cc = ccRecipients;
+    }
+
+    const { data, error } = await resend.emails.send(payload);
 
     if (error) {
-      logger.error('Failed to send email', { to: recipients, subject, error });
+      logger.error('Failed to send email', { to: recipients, cc: ccRecipients, subject, error });
       throw error;
     }
 
-    logger.info('Email sent', { to: recipients, subject, id: data?.id });
+    logger.info('Email sent', { to: recipients, cc: ccRecipients, subject, id: data?.id });
   } catch (error) {
-    logger.error('Email send failed', { to: recipients, subject, error: String(error) });
+    logger.error('Email send failed', { to: recipients, cc: ccRecipients, subject, error: String(error) });
     throw error;
   }
 }
 
 // ─── PASSWORD RESET ────────────────────────────────────────────────────
-export async function sendPasswordResetEmail(email: string, resetToken: string): Promise<void> {
+export async function sendPasswordResetEmail(email: string, resetToken: string, cc?: string[]): Promise<void> {
   const allowed = await shouldSendToUser(email, 'password_reset');
   if (!allowed) {
     logger.info('Password reset email suppressed by preference', { email });
@@ -191,11 +198,11 @@ export async function sendPasswordResetEmail(email: string, resetToken: string):
   const subject = interpolate(tpl.subject, vars);
   const body = interpolate(tpl.body, vars);
 
-  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail, cc);
 }
 
 // ─── PORTAL REGISTRATION (user) ───────────────────────────────────────
-export async function sendRegistrationEmail(email: string, displayName: string): Promise<void> {
+export async function sendRegistrationEmail(email: string, displayName: string, cc?: string[]): Promise<void> {
   const allowed = await shouldSendToUser(email, 'portal_registration');
   if (!allowed) return;
 
@@ -204,7 +211,7 @@ export async function sendRegistrationEmail(email: string, displayName: string):
   const subject = interpolate(tpl.subject, vars);
   const body = interpolate(tpl.body, vars);
 
-  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail, cc);
 }
 
 // ─── PORTAL REGISTRATION (admin) ──────────────────────────────────────
@@ -226,7 +233,7 @@ export async function sendAdminRegistrationNotification(userEmail: string, displ
 }
 
 // ─── REGISTRATION INVITE (admin-triggered) ──────────────────────────────
-export async function sendRegistrationInviteEmail(email: string, displayName: string): Promise<void> {
+export async function sendRegistrationInviteEmail(email: string, displayName: string, cc?: string[]): Promise<void> {
   const tpl = await loadTemplate('registrationInvite');
   const vars = {
     displayName: displayName || 'there',
@@ -236,18 +243,18 @@ export async function sendRegistrationInviteEmail(email: string, displayName: st
   const subject = interpolate(tpl.subject, vars);
   const body = interpolate(tpl.body, vars);
 
-  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail, cc);
 }
 
 // ─── ADMIN-TRIGGERED PASSWORD RESET ─────────────────────────────────────
-export async function sendAdminPasswordResetEmail(email: string, resetToken: string, displayName: string): Promise<void> {
+export async function sendAdminPasswordResetEmail(email: string, resetToken: string, displayName: string, cc?: string[]): Promise<void> {
   const resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
   const tpl = await loadTemplate('adminPasswordReset');
   const vars = { displayName: displayName || 'there', resetUrl };
   const subject = interpolate(tpl.subject, vars);
   const body = interpolate(tpl.body, vars);
 
-  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail, cc);
 }
 
 // ─── DOCUMENT SUBMISSION (user) ────────────────────────────────────────
@@ -257,7 +264,8 @@ export async function sendDocumentSubmissionEmail(
   projectName: string,
   categoryLabel: string,
   documentName: string,
-  filename: string
+  filename: string,
+  cc?: string[]
 ): Promise<void> {
   const allowed = await shouldSendToUser(email, 'document_submission');
   if (!allowed) return;
@@ -274,7 +282,7 @@ export async function sendDocumentSubmissionEmail(
   const subject = interpolate(tpl.subject, vars);
   const body = interpolate(tpl.body, vars);
 
-  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail, cc);
 }
 
 // ─── DOCUMENT SUBMISSION (admin) ───────────────────────────────────────
@@ -320,7 +328,8 @@ export interface WeeklyProjectSummary {
 export async function sendWeeklyUpdateEmail(
   email: string,
   displayName: string,
-  projects: WeeklyProjectSummary[]
+  projects: WeeklyProjectSummary[],
+  cc?: string[]
 ): Promise<void> {
   const allowed = await shouldSendToUser(email, 'weekly_update');
   if (!allowed) return;
@@ -370,7 +379,7 @@ export async function sendWeeklyUpdateEmail(
   const subject = interpolate(tpl.subject, vars);
   const body = interpolate(tpl.body, vars);
 
-  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
+  await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail, cc);
 }
 
 // ─── WEEKLY UPDATE (admin) ─────────────────────────────────────────────
@@ -403,6 +412,79 @@ export async function sendAdminWeeklyUpdateEmail(summary: AdminWeeklySummary): P
   await sendEmail(recipients, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
 }
 
+// ─── UPLOAD DIGEST (admin) ─────────────────────────────────────────────
+export interface UploadDigestProject {
+  projectId: string;
+  projectName: string;
+  clientEmail: string;
+  uploads: {
+    filename: string;
+    categoryLabel: string;
+    status: string;
+    uploadedAt: string;
+  }[];
+}
+
+export async function sendAdminUploadDigestEmail(
+  recipientEmail: string,
+  frequency: 'Daily' | 'Weekly',
+  projects: UploadDigestProject[]
+): Promise<void> {
+  const totalUploads = projects.reduce((sum, p) => sum + p.uploads.length, 0);
+  if (totalUploads === 0) return;
+
+  const statusBadge = (s: string) => {
+    switch (s) {
+      case 'accepted': return '<span class="status-badge status-accepted">Accepted</span>';
+      case 'pending_review': return '<span class="status-badge status-pending">Pending Review</span>';
+      case 'needs_resubmission': return '<span style="display:inline-block;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:600;background:#f8d7da;color:#721c24;">Needs Resubmission</span>';
+      default: return `<span class="status-badge status-pending">${s.replace(/_/g, ' ')}</span>`;
+    }
+  };
+
+  const projectSectionsHtml = projects.map(p => `
+    <div style="margin: 20px 0; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+      <div style="background: #f8f9fa; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
+        <strong style="font-size: 15px;">${p.projectName}</strong>
+        <span style="font-size: 13px; color: #666; margin-left: 8px;">${p.clientEmail}</span>
+        <span style="font-size: 13px; color: #888; float: right;">${p.uploads.length} file(s)</span>
+      </div>
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr style="background: #fafafa;">
+          <th style="padding: 8px 16px; text-align: left; font-size: 12px; color: #888; text-transform: uppercase;">File</th>
+          <th style="padding: 8px 16px; text-align: left; font-size: 12px; color: #888; text-transform: uppercase;">Category</th>
+          <th style="padding: 8px 16px; text-align: left; font-size: 12px; color: #888; text-transform: uppercase;">Status</th>
+          <th style="padding: 8px 16px; text-align: left; font-size: 12px; color: #888; text-transform: uppercase;">Uploaded</th>
+        </tr>
+        ${p.uploads.map(u => `
+        <tr>
+          <td style="padding: 10px 16px; border-top: 1px solid #f0f0f0; font-size: 14px;">${u.filename}</td>
+          <td style="padding: 10px 16px; border-top: 1px solid #f0f0f0; font-size: 14px;">${u.categoryLabel}</td>
+          <td style="padding: 10px 16px; border-top: 1px solid #f0f0f0; font-size: 14px;">${statusBadge(u.status)}</td>
+          <td style="padding: 10px 16px; border-top: 1px solid #f0f0f0; font-size: 13px; color: #666;">${u.uploadedAt}</td>
+        </tr>`).join('')}
+      </table>
+      <div style="padding: 8px 16px; border-top: 1px solid #e5e7eb; text-align: right;">
+        <a href="${frontendUrl}/admin/projects/${p.projectId}" style="font-size: 13px; color: #1e3a5f; text-decoration: none;">View Project →</a>
+      </div>
+    </div>`).join('');
+
+  const tpl = await loadTemplate('adminUploadDigest');
+  const vars = {
+    frequency,
+    frequencyLower: frequency.toLowerCase(),
+    uploadCount: String(totalUploads),
+    projectCount: String(projects.length),
+    periodLabel: frequency === 'Daily' ? '24 hours' : '7 days',
+    projectSections: projectSectionsHtml,
+    adminUrl: `${frontendUrl}/admin`
+  };
+  const subject = interpolate(tpl.subject, vars);
+  const body = interpolate(tpl.body, vars);
+
+  await sendEmail(recipientEmail, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail);
+}
+
 // ─── TEST EMAIL ────────────────────────────────────────────────────────
 function buildSampleVars(): Record<string, string> {
   return {
@@ -424,7 +506,13 @@ function buildSampleVars(): Record<string, string> {
     totalPending: '5',
     totalAccepted: '23',
     newRegistrations: '3',
-    newUploads: '7'
+    newUploads: '7',
+    frequency: 'Weekly',
+    frequencyLower: 'weekly',
+    uploadCount: '5',
+    projectCount: '2',
+    periodLabel: '7 days',
+    projectSections: '<p style="color:#666;font-style:italic;">[Upload digest project sections would appear here]</p>'
   };
 }
 

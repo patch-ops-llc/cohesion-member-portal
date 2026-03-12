@@ -3,6 +3,7 @@ import { z } from 'zod';
 import crypto from 'crypto';
 import * as hubspot from '../services/hubspot';
 import * as emailService from '../services/email';
+import { runUploadDigest } from '../services/scheduler';
 import { adminMiddleware } from '../middleware/admin';
 import { AppError } from '../middleware/errorHandler';
 import { documentStatusSchema } from '../utils/validation';
@@ -365,7 +366,8 @@ router.post('/send-registration-invites', async (req, res, next) => {
     });
     const { projectIds } = schema.parse(req.body);
 
-    const results: { email: string; status: 'sent' | 'already_registered' | 'no_email' | 'error'; error?: string }[] = [];
+    const results: { email: string; status: 'sent' | 'already_registered' | 'no_email' | 'duplicate_skipped' | 'error'; error?: string }[] = [];
+    const emailsAlreadySent = new Set<string>();
 
     for (const projectId of projectIds) {
       try {
@@ -377,9 +379,16 @@ router.post('/send-registration-invites', async (req, res, next) => {
           continue;
         }
 
+        // Skip if we already sent an invite to this email in this batch
+        if (emailsAlreadySent.has(email)) {
+          results.push({ email, status: 'duplicate_skipped' });
+          continue;
+        }
+
         // Check if already registered
         const existingUser = await prisma.user.findUnique({ where: { email } });
         if (existingUser) {
+          emailsAlreadySent.add(email);
           results.push({ email, status: 'already_registered' });
           continue;
         }
@@ -388,7 +397,12 @@ router.post('/send-registration-invites', async (req, res, next) => {
         const contact = await hubspot.findContactByEmail(email);
         const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '';
 
-        await emailService.sendRegistrationInviteEmail(email, displayName);
+        const ccAddrs = project.properties.cc_email?.trim()
+          ? project.properties.cc_email.split(/[,;]\s*/).map(e => e.trim().toLowerCase()).filter(e => e && e !== email)
+          : [];
+
+        await emailService.sendRegistrationInviteEmail(email, displayName, ccAddrs);
+        emailsAlreadySent.add(email);
         results.push({ email, status: 'sent' });
 
         logger.info('Registration invite sent', { email, projectId });
@@ -416,7 +430,8 @@ router.post('/send-registration-invites', async (req, res, next) => {
     });
 
     const sentCount = results.filter(r => r.status === 'sent').length;
-    logger.info('Bulk registration invites completed', { total: projectIds.length, sent: sentCount });
+    const dupCount = results.filter(r => r.status === 'duplicate_skipped').length;
+    logger.info('Bulk registration invites completed', { total: projectIds.length, sent: sentCount, duplicatesSkipped: dupCount });
 
     res.json({
       success: true,
@@ -426,6 +441,7 @@ router.post('/send-registration-invites', async (req, res, next) => {
         sent: sentCount,
         alreadyRegistered: results.filter(r => r.status === 'already_registered').length,
         noEmail: results.filter(r => r.status === 'no_email').length,
+        duplicateSkipped: dupCount,
         errors: results.filter(r => r.status === 'error').length
       }
     });
@@ -446,13 +462,22 @@ router.post('/send-bulk-contact-invites', async (req, res, next) => {
     });
     const { emails } = schema.parse(req.body);
 
-    const results: { email: string; status: 'sent' | 'already_registered' | 'error'; error?: string }[] = [];
+    const results: { email: string; status: 'sent' | 'already_registered' | 'duplicate_skipped' | 'error'; error?: string }[] = [];
+    const emailsAlreadyProcessed = new Set<string>();
 
     for (const rawEmail of emails) {
       const normalizedEmail = rawEmail.toLowerCase().trim();
+
+      // Skip if we already processed this email in this batch
+      if (emailsAlreadyProcessed.has(normalizedEmail)) {
+        results.push({ email: normalizedEmail, status: 'duplicate_skipped' });
+        continue;
+      }
+
       try {
         const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
         if (existingUser) {
+          emailsAlreadyProcessed.add(normalizedEmail);
           results.push({ email: normalizedEmail, status: 'already_registered' });
           continue;
         }
@@ -460,7 +485,9 @@ router.post('/send-bulk-contact-invites', async (req, res, next) => {
         const contact = await hubspot.findContactByEmail(normalizedEmail);
         const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '';
 
-        await emailService.sendRegistrationInviteEmail(normalizedEmail, displayName);
+        const ccAddrs = await hubspot.getCcEmailsForUser(normalizedEmail);
+        await emailService.sendRegistrationInviteEmail(normalizedEmail, displayName, ccAddrs);
+        emailsAlreadyProcessed.add(normalizedEmail);
         results.push({ email: normalizedEmail, status: 'sent' });
 
         logger.info('Bulk contact registration invite sent', { email: normalizedEmail });
@@ -487,7 +514,8 @@ router.post('/send-bulk-contact-invites', async (req, res, next) => {
     });
 
     const sentCount = results.filter(r => r.status === 'sent').length;
-    logger.info('Bulk contact registration invites completed', { total: emails.length, sent: sentCount });
+    const dupCount = results.filter(r => r.status === 'duplicate_skipped').length;
+    logger.info('Bulk contact registration invites completed', { total: emails.length, sent: sentCount, duplicatesSkipped: dupCount });
 
     res.json({
       success: true,
@@ -496,6 +524,7 @@ router.post('/send-bulk-contact-invites', async (req, res, next) => {
         total: results.length,
         sent: sentCount,
         alreadyRegistered: results.filter(r => r.status === 'already_registered').length,
+        duplicateSkipped: dupCount,
         errors: results.filter(r => r.status === 'error').length
       }
     });
@@ -530,7 +559,8 @@ router.post('/send-contact-invite', async (req, res, next) => {
     const contact = await hubspot.findContactByEmail(normalizedEmail);
     const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '';
 
-    await emailService.sendRegistrationInviteEmail(normalizedEmail, displayName);
+    const ccEmails = await hubspot.getCcEmailsForUser(normalizedEmail);
+    await emailService.sendRegistrationInviteEmail(normalizedEmail, displayName, ccEmails);
 
     // Audit log
     await prisma.auditLog.create({
@@ -602,7 +632,8 @@ router.post('/send-password-reset', async (req, res, next) => {
     const contact = await hubspot.findContactByEmail(normalizedEmail);
     const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '';
 
-    await emailService.sendAdminPasswordResetEmail(normalizedEmail, token, displayName);
+    const ccEmails = await hubspot.getCcEmailsForUser(normalizedEmail);
+    await emailService.sendAdminPasswordResetEmail(normalizedEmail, token, displayName, ccEmails);
 
     // Audit log
     await prisma.auditLog.create({
@@ -627,6 +658,47 @@ router.post('/send-password-reset', async (req, res, next) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       next(new AppError('Invalid email address', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// POST /api/admin/upload-digest/send - Manually trigger an upload digest email
+router.post('/upload-digest/send', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      frequency: z.enum(['daily', 'weekly'])
+    });
+    const { frequency } = schema.parse(req.body);
+
+    const result = await runUploadDigest(frequency);
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_trigger_upload_digest',
+        entityType: 'digest',
+        entityId: frequency,
+        userEmail: 'admin',
+        userType: 'admin',
+        details: result,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin triggered upload digest', { frequency, result });
+
+    res.json({
+      success: true,
+      ...result,
+      message: result.skipped
+        ? 'No recipients or no uploads for this period'
+        : `Digest sent to ${result.sent} recipient(s)`
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid frequency - must be "daily" or "weekly"', 400));
     } else {
       next(error);
     }

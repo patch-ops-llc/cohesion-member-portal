@@ -31,7 +31,7 @@ interface ContactSearchResult {
 
 interface InviteResult {
   email: string;
-  status: 'sent' | 'already_registered' | 'no_email' | 'error';
+  status: 'sent' | 'already_registered' | 'no_email' | 'duplicate_skipped' | 'error';
   error?: string;
 }
 
@@ -43,6 +43,7 @@ interface InviteResponse {
     sent: number;
     alreadyRegistered: number;
     noEmail: number;
+    duplicateSkipped: number;
     errors: number;
   };
 }
@@ -441,6 +442,11 @@ export function ProjectManager() {
                 {inviteResults.summary.noEmail > 0 && (
                   <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-600 font-medium">
                     {inviteResults.summary.noEmail} no email
+                  </span>
+                )}
+                {inviteResults.summary.duplicateSkipped > 0 && (
+                  <span className="px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 font-medium">
+                    {inviteResults.summary.duplicateSkipped} duplicate{inviteResults.summary.duplicateSkipped !== 1 ? 's' : ''} skipped
                   </span>
                 )}
                 {inviteResults.summary.errors > 0 && (

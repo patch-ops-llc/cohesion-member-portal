@@ -16,6 +16,7 @@ export interface ProjectProperties {
   hs_pipeline_stage: string;
   document_data: string;
   file_directory?: string;
+  cc_email?: string;
 }
 
 export interface Project {
@@ -47,7 +48,7 @@ export async function getProject(projectId: string): Promise<Project> {
     const response = await hubspotClient.crm.objects.basicApi.getById(
       CUSTOM_OBJECT_TYPE,
       projectId,
-      ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data', 'file_directory']
+      ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data', 'file_directory', 'cc_email']
     );
     return {
       id: response.id,
@@ -70,7 +71,7 @@ export async function getProjectsByEmail(email: string): Promise<Project[]> {
         CUSTOM_OBJECT_TYPE,
         100,
         after,
-        ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data']
+        ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data', 'cc_email']
       );
 
       const matching = response.results.filter(
@@ -104,7 +105,7 @@ export async function getAllProjects(): Promise<{ projects: Project[] }> {
         CUSTOM_OBJECT_TYPE,
         100,
         after,
-        ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data']
+        ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data', 'cc_email']
       );
 
       allProjects.push(...response.results.map(p => ({
@@ -455,6 +456,29 @@ export async function associateProjectWithContact(projectId: string, contactId: 
     logger.info('Associated project with contact', { projectId, contactId });
   } catch (error) {
     logger.warn('Failed to associate project with contact (non-fatal)', { projectId, contactId, error: String(error) });
+  }
+}
+
+// Collect unique cc_email addresses across all projects for a given user email
+export async function getCcEmailsForUser(email: string): Promise<string[]> {
+  try {
+    const projects = await getProjectsByEmail(email);
+    const ccEmails = new Set<string>();
+    for (const project of projects) {
+      const cc = project.properties.cc_email?.trim();
+      if (cc) {
+        for (const addr of cc.split(/[,;]\s*/)) {
+          const normalized = addr.trim().toLowerCase();
+          if (normalized && normalized !== email.toLowerCase().trim()) {
+            ccEmails.add(normalized);
+          }
+        }
+      }
+    }
+    return Array.from(ccEmails);
+  } catch (error) {
+    logger.warn('Failed to get cc_emails for user, skipping CC', { email, error: String(error) });
+    return [];
   }
 }
 
