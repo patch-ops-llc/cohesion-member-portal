@@ -151,7 +151,15 @@ router.get('/cards/all', async (_req, res, next) => {
 router.put('/cards/:key', async (req, res, next) => {
   try {
     const { key } = req.params;
-    const updates = updateSchema.parse(req.body);
+
+    let rawBody = req.body;
+    if (typeof rawBody === 'string') {
+      try { rawBody = JSON.parse(rawBody); } catch {
+        return res.status(400).json({ success: false, error: 'Invalid JSON body' });
+      }
+    }
+
+    const updates = updateSchema.parse(rawBody);
 
     let template = await prisma.emailTemplate.findUnique({ where: { key } });
     if (!template) {
