@@ -52,7 +52,7 @@ async function gatherUploadDigest(days: number): Promise<UploadDigestProject[]> 
       projectId,
       projectName,
       clientEmail,
-      uploads: projectUploads.map(u => ({
+      uploads: projectUploads.map((u: typeof projectUploads[number]) => ({
         filename: u.originalFilename,
         categoryLabel: getCategoryLabel(u.categoryKey),
         status: u.status,
