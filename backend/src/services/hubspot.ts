@@ -459,6 +459,181 @@ export async function associateProjectWithContact(projectId: string, contactId: 
   }
 }
 
+const PROJECT_PROPERTIES = ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data', 'cc_email'];
+
+// Get projects associated with a contact via CRM associations
+export async function getProjectsByContactAssociation(contactId: string): Promise<Project[]> {
+  try {
+    const response = await axios.get<{
+      results?: Array<{ toObjectId: number }>;
+      paging?: { next?: { after: string } };
+    }>(
+      `https://api.hubapi.com/crm/v4/objects/contacts/${contactId}/associations/${CUSTOM_OBJECT_TYPE}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`
+        }
+      }
+    );
+
+    const projectIds = response.data?.results?.map(r => String(r.toObjectId)) || [];
+    if (projectIds.length === 0) return [];
+
+    // Batch-fetch project details (HubSpot batch read supports up to 100)
+    const batchResponse = await axios.post<{
+      results?: Array<{ id: string; properties: Record<string, string> }>;
+    }>(
+      `https://api.hubapi.com/crm/v3/objects/${CUSTOM_OBJECT_TYPE}/batch/read`,
+      {
+        properties: PROJECT_PROPERTIES,
+        inputs: projectIds.map(id => ({ id }))
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const projects = (batchResponse.data?.results || []).map(p => ({
+      id: p.id,
+      properties: p.properties as unknown as ProjectProperties
+    }));
+
+    logger.info(`Found ${projects.length} projects via contact association`, { contactId });
+    return projects;
+  } catch (error) {
+    logger.error('Failed to get projects by contact association', { contactId, error: String(error) });
+    return [];
+  }
+}
+
+// Combine email-matched and association-matched projects (deduplicated)
+export async function getProjectsForUser(email: string, contactId: string | null): Promise<Project[]> {
+  const [emailProjects, assocProjects] = await Promise.all([
+    getProjectsByEmail(email),
+    contactId ? getProjectsByContactAssociation(contactId) : Promise.resolve([])
+  ]);
+
+  const projectMap = new Map<string, Project>();
+  for (const p of emailProjects) projectMap.set(p.id, p);
+  for (const p of assocProjects) {
+    if (!projectMap.has(p.id)) projectMap.set(p.id, p);
+  }
+
+  logger.info('Combined project lookup', {
+    email,
+    contactId,
+    emailCount: emailProjects.length,
+    assocCount: assocProjects.length,
+    totalUnique: projectMap.size
+  });
+
+  return Array.from(projectMap.values());
+}
+
+// Check if a user has access to a specific project (by email match or association)
+export async function userHasProjectAccess(
+  projectId: string,
+  email: string,
+  contactId: string | null
+): Promise<boolean> {
+  const project = await getProject(projectId);
+
+  // Check 1: email match
+  if (project.properties.email?.toLowerCase().trim() === email.toLowerCase().trim()) {
+    return true;
+  }
+
+  // Check 2: contact association
+  if (contactId) {
+    try {
+      const response = await axios.get<{
+        results?: Array<{ toObjectId: number }>;
+      }>(
+        `https://api.hubapi.com/crm/v4/objects/contacts/${contactId}/associations/${CUSTOM_OBJECT_TYPE}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`
+          }
+        }
+      );
+      const associatedIds = response.data?.results?.map(r => String(r.toObjectId)) || [];
+      if (associatedIds.includes(projectId)) return true;
+    } catch (error) {
+      logger.warn('Failed to check contact association for access', { projectId, contactId, error: String(error) });
+    }
+  }
+
+  return false;
+}
+
+// Get all contacts associated with a project
+export async function getAssociatedContacts(projectId: string): Promise<ContactInfo[]> {
+  try {
+    const response = await axios.get<{
+      results?: Array<{ toObjectId: number }>;
+    }>(
+      `https://api.hubapi.com/crm/v4/objects/${CUSTOM_OBJECT_TYPE}/${projectId}/associations/contacts`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`
+        }
+      }
+    );
+
+    const contactIds = response.data?.results?.map(r => String(r.toObjectId)) || [];
+    if (contactIds.length === 0) return [];
+
+    const batchResponse = await axios.post<{
+      results?: Array<{ id: string; properties: Record<string, string> }>;
+    }>(
+      'https://api.hubapi.com/crm/v3/objects/contacts/batch/read',
+      {
+        properties: ['email', 'firstname', 'lastname'],
+        inputs: contactIds.map(id => ({ id }))
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return (batchResponse.data?.results || [])
+      .filter(c => c.properties.email)
+      .map(c => ({
+        id: c.id,
+        email: c.properties.email!,
+        firstName: c.properties.firstname?.trim() || undefined,
+        lastName: c.properties.lastname?.trim() || undefined
+      }));
+  } catch (error) {
+    logger.error('Failed to get associated contacts', { projectId, error: String(error) });
+    return [];
+  }
+}
+
+// Remove association between a project and a contact
+export async function removeProjectContactAssociation(projectId: string, contactId: string): Promise<void> {
+  try {
+    await axios.delete(
+      `https://api.hubapi.com/crm/v4/objects/${CUSTOM_OBJECT_TYPE}/${projectId}/associations/contacts/${contactId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`
+        }
+      }
+    );
+    logger.info('Removed project-contact association', { projectId, contactId });
+  } catch (error) {
+    logger.error('Failed to remove project-contact association', { projectId, contactId, error: String(error) });
+    throw error;
+  }
+}
+
 // Collect unique cc_email addresses across all projects for a given user email
 export async function getCcEmailsForUser(email: string): Promise<string[]> {
   try {

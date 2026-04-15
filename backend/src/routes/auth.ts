@@ -97,8 +97,9 @@ router.post('/register', async (req, res, next) => {
       throw new AppError('Server configuration error', 500);
     }
 
+    const hubspotContactId = contact?.id ?? null;
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      { userId: user.id, email: user.email, hubspotContactId },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRY } as jwt.SignOptions
     );
@@ -175,8 +176,20 @@ router.post('/login', async (req, res, next) => {
       throw new AppError('Server configuration error', 500);
     }
 
+    const contact = await hubspot.findContactByEmail(normalizedEmail);
+
+    // Backfill hubspotContactId if it was missing when the user first registered
+    let hubspotContactId = user.hubspotContactId;
+    if (!hubspotContactId && contact?.id) {
+      hubspotContactId = contact.id;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { hubspotContactId: contact.id }
+      });
+    }
+
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      { userId: user.id, email: user.email, hubspotContactId: hubspotContactId ?? null },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRY } as jwt.SignOptions
     );
@@ -186,7 +199,6 @@ router.post('/login', async (req, res, next) => {
       data: { lastLoginAt: new Date() }
     });
 
-    const contact = await hubspot.findContactByEmail(normalizedEmail);
     const displayName =
       [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || user.email;
 
@@ -302,13 +314,24 @@ router.post('/reset-password', async (req, res, next) => {
       throw new AppError('Server configuration error', 500);
     }
 
+    const contact = await hubspot.findContactByEmail(resetRecord.user.email);
+
+    // Backfill hubspotContactId if missing
+    let hubspotContactId = resetRecord.user.hubspotContactId;
+    if (!hubspotContactId && contact?.id) {
+      hubspotContactId = contact.id;
+      await prisma.user.update({
+        where: { id: resetRecord.userId },
+        data: { hubspotContactId: contact.id }
+      });
+    }
+
     const jwtToken = jwt.sign(
-      { userId: resetRecord.userId, email: resetRecord.user.email },
+      { userId: resetRecord.userId, email: resetRecord.user.email, hubspotContactId: hubspotContactId ?? null },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRY } as jwt.SignOptions
     );
 
-    const contact = await hubspot.findContactByEmail(resetRecord.user.email);
     const displayName =
       [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') ||
       resetRecord.user.email;

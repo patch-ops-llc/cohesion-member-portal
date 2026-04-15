@@ -15,8 +15,9 @@ router.get('/', authMiddleware, async (req: AuthRequest, res, next) => {
   try {
     const email = req.user!.email;
     const normalizedEmail = email.toLowerCase().trim();
+    const contactId = req.user!.hubspotContactId ?? null;
 
-    const projects = await hubspot.getProjectsByEmail(normalizedEmail);
+    const projects = await hubspot.getProjectsForUser(normalizedEmail, contactId);
 
     const transformedProjects = projects.map(project => {
       const documentData = hubspot.parseDocumentData(project.properties.document_data);
@@ -48,12 +49,14 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res, next) => {
   try {
     const { id } = req.params;
     const normalizedEmail = req.user!.email.toLowerCase().trim();
-    const project = await hubspot.getProject(id);
+    const contactId = req.user!.hubspotContactId ?? null;
 
-    // Verify user has access to this project
-    if (project.properties.email?.toLowerCase().trim() !== normalizedEmail) {
+    const hasAccess = await hubspot.userHasProjectAccess(id, normalizedEmail, contactId);
+    if (!hasAccess) {
       throw new AppError('Access denied', 403);
     }
+
+    const project = await hubspot.getProject(id);
 
     const documentData = hubspot.parseDocumentData(project.properties.document_data);
     const stage = getNormalizedStage(project.properties.hs_pipeline_stage);
@@ -88,6 +91,7 @@ router.patch('/:id/document-data', authMiddleware, async (req: AuthRequest, res,
   try {
     const { id } = req.params;
     const normalizedEmail = req.user!.email.toLowerCase().trim();
+    const contactId = req.user!.hubspotContactId ?? null;
     
     // Validate request body
     const schema = z.object({
@@ -97,11 +101,13 @@ router.patch('/:id/document-data', authMiddleware, async (req: AuthRequest, res,
 
     const { documentData, modifiedFields } = schema.parse(req.body);
 
-    // Get current project and verify access
-    const project = await hubspot.getProject(id);
-    if (project.properties.email?.toLowerCase().trim() !== normalizedEmail) {
+    // Verify access via email match or contact association
+    const hasAccess = await hubspot.userHasProjectAccess(id, normalizedEmail, contactId);
+    if (!hasAccess) {
       throw new AppError('Access denied', 403);
     }
+
+    const project = await hubspot.getProject(id);
 
     // Get latest HubSpot data
     const hubspotData = hubspot.parseDocumentData(project.properties.document_data);

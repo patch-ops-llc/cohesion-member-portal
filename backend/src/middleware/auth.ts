@@ -6,12 +6,13 @@ import { AppError } from './errorHandler';
 export interface JwtPayload {
   userId: string;
   email: string;
+  hubspotContactId?: string | null;
   iat?: number;
   exp?: number;
 }
 
 export interface AuthRequest extends Request {
-  user?: { id: string; email: string };
+  user?: { id: string; email: string; hubspotContactId: string | null };
 }
 
 export function authMiddleware(req: AuthRequest, _res: Response, next: NextFunction): void {
@@ -29,7 +30,7 @@ export function authMiddleware(req: AuthRequest, _res: Response, next: NextFunct
 
   try {
     const decoded = jwt.verify(token, secret) as JwtPayload;
-    req.user = { id: decoded.userId, email: decoded.email };
+    req.user = { id: decoded.userId, email: decoded.email, hubspotContactId: decoded.hubspotContactId ?? null };
     next();
   } catch {
     return next(new AppError('Invalid or expired token', 401));
@@ -56,7 +57,7 @@ export async function optionalAuthMiddleware(req: AuthRequest, _res: Response, n
       where: { id: decoded.userId }
     });
     if (user) {
-      req.user = { id: user.id, email: user.email };
+      req.user = { id: user.id, email: user.email, hubspotContactId: user.hubspotContactId ?? null };
     }
   } catch {
     // Ignore invalid tokens

@@ -48,6 +48,7 @@ router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (
     }
 
     const normalizedEmail = req.user!.email.toLowerCase().trim();
+    const contactId = req.user!.hubspotContactId ?? null;
 
     // Validate file
     const validation = validateFile(file);
@@ -56,12 +57,13 @@ router.post('/:projectId/upload', authMiddleware, upload.single('file'), async (
       throw new AppError(validation.error || 'Invalid file', 400);
     }
 
-    // Get project and verify access
-    const project = await hubspot.getProject(projectId);
-    if (project.properties.email?.toLowerCase().trim() !== normalizedEmail) {
+    // Get project and verify access (email match or contact association)
+    const hasAccess = await hubspot.userHasProjectAccess(projectId, normalizedEmail, contactId);
+    if (!hasAccess) {
       fs.unlinkSync(file.path);
       throw new AppError('Access denied', 403);
     }
+    const project = await hubspot.getProject(projectId);
 
     // 1. Save to local storage (backup)
     const storedPath = await storage.saveFile(file.path, file.originalname, projectId);
@@ -196,9 +198,10 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res, next) => {
       throw new AppError('File not found', 404);
     }
 
-    // Verify user has access to this project
-    const project = await hubspot.getProject(fileUpload.projectId);
-    if (project.properties.email?.toLowerCase().trim() !== normalizedEmail) {
+    // Verify user has access to this project (email match or contact association)
+    const contactId = req.user!.hubspotContactId ?? null;
+    const hasAccess = await hubspot.userHasProjectAccess(fileUpload.projectId, normalizedEmail, contactId);
+    if (!hasAccess) {
       throw new AppError('Access denied', 403);
     }
 

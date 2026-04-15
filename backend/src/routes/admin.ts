@@ -358,6 +358,91 @@ router.post('/projects', async (req, res, next) => {
   }
 });
 
+// GET /api/admin/projects/:id/contacts - List all contacts associated with a project
+router.get('/projects/:id/contacts', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const contacts = await hubspot.getAssociatedContacts(id);
+
+    res.json({
+      success: true,
+      contacts
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/admin/projects/:id/contacts - Associate an additional contact with a project
+router.post('/projects/:id/contacts', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const schema = z.object({
+      contactId: z.string().min(1, 'Contact ID is required')
+    });
+    const { contactId } = schema.parse(req.body);
+
+    await hubspot.associateProjectWithContact(id, contactId);
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_add_project_contact',
+        entityType: 'project',
+        entityId: id,
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { contactId },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin added contact to project', { projectId: id, contactId });
+
+    res.json({
+      success: true,
+      message: 'Contact associated with project'
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError(error.errors[0]?.message || 'Invalid request', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// DELETE /api/admin/projects/:id/contacts/:contactId - Remove a contact association from a project
+router.delete('/projects/:id/contacts/:contactId', async (req, res, next) => {
+  try {
+    const { id, contactId } = req.params;
+
+    await hubspot.removeProjectContactAssociation(id, contactId);
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_remove_project_contact',
+        entityType: 'project',
+        entityId: id,
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { contactId },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin removed contact from project', { projectId: id, contactId });
+
+    res.json({
+      success: true,
+      message: 'Contact removed from project'
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /api/admin/send-registration-invites - Send invite emails to selected project emails
 router.post('/send-registration-invites', async (req, res, next) => {
   try {
