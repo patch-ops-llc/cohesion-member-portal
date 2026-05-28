@@ -451,49 +451,83 @@ router.post('/send-registration-invites', async (req, res, next) => {
     });
     const { projectIds } = schema.parse(req.body);
 
-    const results: { email: string; status: 'sent' | 'already_registered' | 'no_email' | 'duplicate_skipped' | 'error'; error?: string }[] = [];
+    const results: { email: string; projectId?: string; status: 'sent' | 'already_registered' | 'no_email' | 'duplicate_skipped' | 'error'; error?: string }[] = [];
     const emailsAlreadySent = new Set<string>();
 
     for (const projectId of projectIds) {
       try {
         const project = await hubspot.getProject(projectId);
-        const email = project.properties.email?.toLowerCase().trim();
+        const primaryEmail = project.properties.email?.toLowerCase().trim() || '';
 
-        if (!email) {
-          results.push({ email: projectId, status: 'no_email' });
+        // Build a deduplicated recipient list: primary project email + every
+        // associated HubSpot contact. Each recipient must receive their own
+        // invite (with their own personalized registration call-to-action),
+        // not just a CC on the primary recipient's email.
+        const recipientMap = new Map<string, { email: string; displayName: string }>();
+
+        if (primaryEmail) {
+          const contact = await hubspot.findContactByEmail(primaryEmail);
+          const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '';
+          recipientMap.set(primaryEmail, { email: primaryEmail, displayName });
+        }
+
+        const associatedContacts = await hubspot.getAssociatedContacts(projectId);
+        for (const c of associatedContacts) {
+          const normalized = c.email?.toLowerCase().trim();
+          if (!normalized || recipientMap.has(normalized)) continue;
+          const displayName = [c.firstName, c.lastName].filter(Boolean).join(' ') || '';
+          recipientMap.set(normalized, { email: normalized, displayName });
+        }
+
+        if (recipientMap.size === 0) {
+          results.push({ email: projectId, projectId, status: 'no_email' });
           continue;
         }
 
-        // Skip if we already sent an invite to this email in this batch
-        if (emailsAlreadySent.has(email)) {
-          results.push({ email, status: 'duplicate_skipped' });
-          continue;
-        }
-
-        // Check if already registered
-        const existingUser = await prisma.user.findUnique({ where: { email } });
-        if (existingUser) {
-          emailsAlreadySent.add(email);
-          results.push({ email, status: 'already_registered' });
-          continue;
-        }
-
-        // Get contact name for personalization
-        const contact = await hubspot.findContactByEmail(email);
-        const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || '';
-
-        const ccAddrs = project.properties.cc_email?.trim()
-          ? project.properties.cc_email.split(/[,;]\s*/).map(e => e.trim().toLowerCase()).filter(e => e && e !== email)
+        // Parse the project's cc_email field once. Anyone listed there who is
+        // ALSO a recipient is excluded — they'll receive their own TO invite,
+        // so we don't want to CC them on someone else's.
+        const projectCcAddrs = project.properties.cc_email?.trim()
+          ? project.properties.cc_email
+              .split(/[,;]\s*/)
+              .map(e => e.trim().toLowerCase())
+              .filter(Boolean)
           : [];
 
-        await emailService.sendRegistrationInviteEmail(email, displayName, ccAddrs);
-        emailsAlreadySent.add(email);
-        results.push({ email, status: 'sent' });
+        for (const { email, displayName } of recipientMap.values()) {
+          try {
+            if (emailsAlreadySent.has(email)) {
+              results.push({ email, projectId, status: 'duplicate_skipped' });
+              continue;
+            }
 
-        logger.info('Registration invite sent', { email, projectId });
+            const existingUser = await prisma.user.findUnique({ where: { email } });
+            if (existingUser) {
+              emailsAlreadySent.add(email);
+              results.push({ email, projectId, status: 'already_registered' });
+              continue;
+            }
+
+            const ccAddrs = projectCcAddrs.filter(e => e !== email && !recipientMap.has(e));
+
+            await emailService.sendRegistrationInviteEmail(email, displayName, ccAddrs);
+            emailsAlreadySent.add(email);
+            results.push({ email, projectId, status: 'sent' });
+
+            logger.info('Registration invite sent', { email, projectId });
+          } catch (err) {
+            results.push({
+              email,
+              projectId,
+              status: 'error',
+              error: err instanceof Error ? err.message : String(err)
+            });
+          }
+        }
       } catch (err) {
         results.push({
           email: projectId,
+          projectId,
           status: 'error',
           error: err instanceof Error ? err.message : String(err)
         });
