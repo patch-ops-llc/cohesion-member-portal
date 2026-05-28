@@ -7,6 +7,7 @@ import { InlineLoader } from '../shared/LoadingSpinner';
 import { ErrorMessage } from '../shared/ErrorBoundary';
 import { DocumentChecklist } from '../portal/DocumentChecklist';
 import { useDocumentData } from '../../hooks/useDocumentData';
+import { normalizeFolderUrl } from '../../utils/hubspot';
 import type { DocumentData, FileUpload } from '../../types';
 
 interface AdminProjectDetail {
@@ -87,7 +88,7 @@ export function ProjectEditor() {
         </Link>
         {data.project.fileDirectory && (
           <a
-            href={data.project.fileDirectory}
+            href={normalizeFolderUrl(data.project.fileDirectory)}
             target="_blank"
             rel="noopener noreferrer"
             className="btn-outline text-sm"

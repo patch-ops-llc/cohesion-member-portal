@@ -9,6 +9,32 @@ const hubspotClient = new Client({
 });
 
 const CUSTOM_OBJECT_TYPE = process.env.HUBSPOT_CUSTOM_OBJECT_TYPE || '2-171216725';
+const HUBSPOT_PORTAL_ID = process.env.HUBSPOT_PORTAL_ID || '242796132';
+
+// Build the canonical HubSpot File Manager URL for a folder.
+// HubSpot expects: https://app-na2.hubspot.com/files/<portalId>/?folderId=<folderId>
+export function buildFolderUrl(folderId: string | number): string {
+  return `https://app-na2.hubspot.com/files/${HUBSPOT_PORTAL_ID}/?folderId=${folderId}`;
+}
+
+// Pull the folder id out of any stored file_directory value, handling both the
+// correct format (…?folderId=<id>) and the legacy/malformed format
+// (https://app.hubspot.com/files/<id>).
+export function extractFolderId(fileDirectory?: string | null): string | null {
+  if (!fileDirectory) return null;
+  const withParam = fileDirectory.match(/folderId=(\d+)/);
+  if (withParam) return withParam[1];
+  const legacy = fileDirectory.match(/\/files\/(\d+)\/?$/);
+  if (legacy) return legacy[1];
+  return null;
+}
+
+// Normalize a possibly-malformed file_directory into the canonical URL.
+// Returns null when no folder id can be recovered.
+export function normalizeFolderUrl(fileDirectory?: string | null): string | null {
+  const folderId = extractFolderId(fileDirectory);
+  return folderId ? buildFolderUrl(folderId) : null;
+}
 
 export interface ProjectProperties {
   client_project_name: string;
@@ -221,13 +247,26 @@ export async function getOrCreateProjectFolder(
   try {
     const project = await getProject(projectId);
     
-    // Check if folder already exists
-    if (project.properties.file_directory) {
-      const match = project.properties.file_directory.match(/folderId=(\d+)/);
-      if (match) {
-        logger.debug('Using existing folder', { folderId: match[1] });
-        return match[1];
+    // Check if folder already exists. Handles both the correct format and the
+    // legacy malformed format so we never create a duplicate folder.
+    const existingFolderId = extractFolderId(project.properties.file_directory);
+    if (existingFolderId) {
+      // Repair the stored URL in place if it isn't in the canonical format.
+      const canonicalUrl = buildFolderUrl(existingFolderId);
+      if (project.properties.file_directory !== canonicalUrl) {
+        try {
+          await hubspotClient.crm.objects.basicApi.update(
+            CUSTOM_OBJECT_TYPE,
+            projectId,
+            { properties: { file_directory: canonicalUrl } }
+          );
+          logger.info('Repaired malformed file_directory', { projectId, folderId: existingFolderId });
+        } catch (repairError) {
+          logger.warn('Failed to repair file_directory (continuing)', { projectId, error: String(repairError) });
+        }
       }
+      logger.debug('Using existing folder', { folderId: existingFolderId });
+      return existingFolderId;
     }
 
     // Create new folder
@@ -245,7 +284,7 @@ export async function getOrCreateProjectFolder(
     );
 
     const folderId = response.data.id;
-    const folderUrl = `https://app.hubspot.com/files/${folderId}`;
+    const folderUrl = buildFolderUrl(folderId);
 
     // Update project with folder URL
     await hubspotClient.crm.objects.basicApi.update(
