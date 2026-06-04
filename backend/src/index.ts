@@ -97,7 +97,7 @@ app.use(errorHandler);
 app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  startScheduler();
+  startScheduler().catch(err => logger.error('Failed to start scheduler', { error: String(err) }));
 });
 
 export default app;

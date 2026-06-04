@@ -1,12 +1,17 @@
 import { useState, useEffect } from 'react';
-import { Bell, Check, AlertCircle, Mail, Plus, X, Save, Send, Calendar } from 'lucide-react';
+import { Bell, Check, AlertCircle, Mail, Plus, X, Save, Send, Calendar, Users, ChevronDown, ChevronRight } from 'lucide-react';
+import { WeeklyDigestClients } from './WeeklyDigestClients';
+import { ClientDigestScheduleEditor, UploadDigestScheduleEditor } from './DigestScheduleEditors';
 import {
   getAdminEmails,
   setAdminEmails,
   getAdminPreferences,
   updateAdminPreference,
   updateAdminPreferencesBulk,
-  triggerUploadDigest
+  triggerUploadDigest,
+  getWeeklyDigestEnabled,
+  setWeeklyDigestEnabled,
+  sendWeeklyClientDigest
 } from '../../services/notifications';
 import type { AdminNotificationPreferences, UploadDigestFrequency } from '../../types';
 
@@ -66,6 +71,12 @@ export function AdminNotificationSettings() {
   const [emailsDirty, setEmailsDirty] = useState(false);
   const [digestSending, setDigestSending] = useState<string | null>(null);
 
+  // Weekly client digest
+  const [weeklyDigestEnabled, setWeeklyDigestEnabledState] = useState(false);
+  const [weeklyDigestSaving, setWeeklyDigestSaving] = useState(false);
+  const [weeklyDigestSending, setWeeklyDigestSending] = useState(false);
+  const [showClientManager, setShowClientManager] = useState(false);
+
   useEffect(() => {
     loadAll();
   }, []);
@@ -74,17 +85,50 @@ export function AdminNotificationSettings() {
     try {
       setLoading(true);
       setError(null);
-      const [emails, prefsResult] = await Promise.all([
+      const [emails, prefsResult, weeklyEnabled] = await Promise.all([
         getAdminEmails(),
-        getAdminPreferences().catch(() => ({ adminEmails: [], preferences: [] }))
+        getAdminPreferences().catch(() => ({ adminEmails: [], preferences: [] })),
+        getWeeklyDigestEnabled().catch(() => false)
       ]);
       setAdminEmailsState(emails);
       setPreferences(prefsResult.preferences);
+      setWeeklyDigestEnabledState(weeklyEnabled);
       setEmailsDirty(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleWeeklyDigest = async (value: boolean) => {
+    setWeeklyDigestSaving(true);
+    setError(null);
+    setWeeklyDigestEnabledState(value);
+    try {
+      const saved = await setWeeklyDigestEnabled(value);
+      setWeeklyDigestEnabledState(saved);
+      setSuccessMessage(`Weekly client digest ${saved ? 'enabled' : 'disabled'}`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setWeeklyDigestEnabledState(!value);
+      setError(err instanceof Error ? err.message : 'Failed to update weekly digest setting');
+    } finally {
+      setWeeklyDigestSaving(false);
+    }
+  };
+
+  const handleSendWeeklyDigest = async () => {
+    setWeeklyDigestSending(true);
+    setError(null);
+    try {
+      const result = await sendWeeklyClientDigest();
+      setSuccessMessage(result.message);
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send weekly digest');
+    } finally {
+      setWeeklyDigestSending(false);
     }
   };
 
@@ -282,6 +326,80 @@ export function AdminNotificationSettings() {
         </div>
       )}
 
+      {/* Weekly Client Digest */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <div className="flex items-center space-x-2">
+            <Calendar className="h-4 w-4 text-primary" />
+            <h3 className="font-semibold text-gray-900">Weekly Client Digest</h3>
+          </div>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Sends each client a weekly email summarizing their project status and outstanding documents (every Monday at 8:00 AM Central). Individual clients can still opt out from their own notification settings.
+          </p>
+        </div>
+        <div className="flex items-center justify-between p-5">
+          <div className="flex-1 mr-4">
+            <h4 className="text-sm font-semibold text-gray-900">Enable Weekly Digest</h4>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {weeklyDigestEnabled
+                ? 'Clients receive a weekly status email automatically.'
+                : 'Automatic weekly client emails are turned off.'}
+            </p>
+          </div>
+          <Toggle
+            enabled={weeklyDigestEnabled}
+            onChange={handleToggleWeeklyDigest}
+            disabled={weeklyDigestSaving}
+          />
+        </div>
+        <div className="px-5 py-4 border-t border-gray-100">
+          <h4 className="text-sm font-semibold text-gray-900 mb-3">Schedule</h4>
+          <ClientDigestScheduleEditor />
+        </div>
+        <div className="px-5 py-4 border-t border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-900">Send Now</h4>
+              <p className="text-xs text-gray-500 mt-0.5">Manually send the weekly digest to all clients immediately</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSendWeeklyDigest}
+              disabled={weeklyDigestSending}
+              className="flex items-center space-x-1.5 px-3 py-1.5 text-sm border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              <Send className="h-3.5 w-3.5" />
+              <span>{weeklyDigestSending ? 'Sending...' : 'Send to All Clients'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Per-client management (expandable) */}
+        <div className="border-t border-gray-100">
+          <button
+            type="button"
+            onClick={() => setShowClientManager(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-gray-50 rounded-b-xl transition-colors"
+          >
+            <div className="flex items-center space-x-2">
+              <Users className="h-4 w-4 text-gray-400" />
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900">Manage Per-Client Settings</h4>
+                <p className="text-xs text-gray-500 mt-0.5">Enable/disable or send the digest for individual clients</p>
+              </div>
+            </div>
+            {showClientManager
+              ? <ChevronDown className="h-4 w-4 text-gray-400" />
+              : <ChevronRight className="h-4 w-4 text-gray-400" />}
+          </button>
+          {showClientManager && (
+            <div className="px-5 pb-5">
+              <WeeklyDigestClients />
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Admin Email List */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200">
         <div className="px-5 py-4 border-b border-gray-100">
@@ -425,6 +543,12 @@ export function AdminNotificationSettings() {
               <p className="text-xs text-gray-500 mt-0.5">
                 Receive a summary of all documents uploaded across projects, grouped by project with file details and links
               </p>
+            </div>
+
+            {/* Schedule */}
+            <div className="p-5 border-b border-gray-100">
+              <h4 className="text-sm font-semibold text-gray-900 mb-3">Schedule</h4>
+              <UploadDigestScheduleEditor />
             </div>
 
             {/* Bulk frequency selector */}

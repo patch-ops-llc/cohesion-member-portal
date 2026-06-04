@@ -3,7 +3,22 @@ import { z } from 'zod';
 import crypto from 'crypto';
 import * as hubspot from '../services/hubspot';
 import * as emailService from '../services/email';
-import { runUploadDigest } from '../services/scheduler';
+import {
+  runUploadDigest,
+  runWeeklyClientDigest,
+  runAdminWeeklySummary,
+  scheduleClientDigest,
+  scheduleUploadDigest
+} from '../services/scheduler';
+import {
+  getWeeklyClientDigestEnabled,
+  setWeeklyClientDigestEnabled,
+  getWeeklyClientDigestSchedule,
+  setWeeklyClientDigestSchedule,
+  getUploadDigestSchedule,
+  setUploadDigestSchedule,
+  ALLOWED_TIMEZONES
+} from '../services/settings';
 import { adminMiddleware } from '../middleware/admin';
 import { AppError } from '../middleware/errorHandler';
 import { documentStatusSchema } from '../utils/validation';
@@ -818,6 +833,375 @@ router.post('/upload-digest/send', async (req, res, next) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       next(new AppError('Invalid frequency - must be "daily" or "weekly"', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// GET /api/admin/registered-users - List everyone who has registered for the portal
+router.get('/registered-users', async (req, res, next) => {
+  try {
+    const { search } = req.query;
+
+    const users = await prisma.user.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Resolve display names from HubSpot in a single batch read.
+    const contactIds = users
+      .map(u => u.hubspotContactId)
+      .filter((id): id is string => Boolean(id));
+    const contactMap = await hubspot.getContactsByIds(contactIds);
+
+    let rows = users.map(u => {
+      const contact = u.hubspotContactId ? contactMap.get(u.hubspotContactId) : undefined;
+      const displayName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ');
+      return {
+        id: u.id,
+        email: u.email,
+        displayName: displayName || null,
+        hubspotContactId: u.hubspotContactId,
+        registeredAt: u.createdAt,
+        lastLoginAt: u.lastLoginAt
+      };
+    });
+
+    if (search && typeof search === 'string') {
+      const q = search.toLowerCase().trim();
+      rows = rows.filter(
+        r => r.email.toLowerCase().includes(q) || (r.displayName || '').toLowerCase().includes(q)
+      );
+    }
+
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const registeredLast7Days = users.filter(u => u.createdAt >= weekAgo).length;
+
+    logger.info('Admin fetched registered users', { count: rows.length });
+
+    res.json({
+      success: true,
+      users: rows,
+      total: users.length,
+      registeredLast7Days
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/admin/weekly-digest/settings - Get weekly client digest on/off state
+router.get('/weekly-digest/settings', async (_req, res, next) => {
+  try {
+    const enabled = await getWeeklyClientDigestEnabled();
+    res.json({ success: true, enabled });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/admin/weekly-digest/settings - Enable or disable the weekly client digest
+router.put('/weekly-digest/settings', async (req, res, next) => {
+  try {
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
+    const saved = await setWeeklyClientDigestEnabled(enabled);
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_set_weekly_digest_enabled',
+        entityType: 'setting',
+        entityId: 'weeklyClientDigestEnabled',
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { enabled: saved },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin updated weekly client digest setting', { enabled: saved });
+    res.json({ success: true, enabled: saved });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid request - "enabled" must be a boolean', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// POST /api/admin/weekly-digest/send - Manually trigger the weekly client digest now.
+// Optional body { emails: string[] } sends to only that subset of clients.
+router.post('/weekly-digest/send', async (req, res, next) => {
+  try {
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch { body = {}; }
+    }
+    const { emails } = z.object({ emails: z.array(z.string().email()).optional() }).parse(body || {});
+    const isSubset = Boolean(emails && emails.length > 0);
+
+    // Manual sends always run (skip the global on/off gate); per-client opt-outs
+    // are still respected inside the digest send.
+    const clientResult = await runWeeklyClientDigest({ filterEmails: emails, skipGlobalCheck: true });
+
+    // Only refresh the admin summary on a full send, not targeted subsets.
+    if (!isSubset) {
+      await runAdminWeeklySummary().catch(err =>
+        logger.error('Admin weekly summary failed during manual digest run', { error: String(err) })
+      );
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_trigger_weekly_client_digest',
+        entityType: 'digest',
+        entityId: isSubset ? 'weekly_client_subset' : 'weekly_client',
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { ...clientResult, emails: emails ?? 'all' },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin triggered weekly client digest', { ...clientResult, isSubset });
+
+    res.json({
+      success: true,
+      ...clientResult,
+      message: clientResult.skipped
+        ? 'No matching clients to send (everyone selected may have opted out)'
+        : `Weekly digest sent to ${clientResult.sent} client(s)`
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid request - "emails" must be an array of email addresses', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// GET /api/admin/weekly-digest/clients - List all clients with their per-client digest state
+router.get('/weekly-digest/clients', async (_req, res, next) => {
+  try {
+    const { projects } = await hubspot.getAllProjects();
+
+    // Group projects by client email, tracking a representative project name + count.
+    const byEmail = new Map<string, { projectCount: number; sampleName: string }>();
+    for (const p of projects) {
+      const email = p.properties.email?.toLowerCase().trim();
+      if (!email) continue;
+      const existing = byEmail.get(email);
+      if (existing) {
+        existing.projectCount++;
+      } else {
+        byEmail.set(email, { projectCount: 1, sampleName: p.properties.client_project_name || '' });
+      }
+    }
+
+    const emails = [...byEmail.keys()];
+    if (emails.length === 0) {
+      return res.json({ success: true, clients: [], total: 0 });
+    }
+
+    // Per-client weeklyUpdate preference (default ON when no record exists).
+    const prefs = await prisma.notificationPreference.findMany({
+      where: { email: { in: emails } }
+    });
+    const prefMap = new Map(prefs.map(p => [p.email, p.weeklyUpdate]));
+
+    // Resolve display names cheaply: registered users have a HubSpot contact id
+    // we can batch-read. Unregistered clients fall back to the project name.
+    const registeredUsers = await prisma.user.findMany({
+      where: { email: { in: emails } },
+      select: { email: true, hubspotContactId: true }
+    });
+    const contactIdByEmail = new Map(
+      registeredUsers
+        .filter(u => u.hubspotContactId)
+        .map(u => [u.email, u.hubspotContactId as string])
+    );
+    const contactMap = await hubspot.getContactsByIds([...contactIdByEmail.values()]);
+
+    const clients = emails
+      .map(email => {
+        const info = byEmail.get(email)!;
+        const contactId = contactIdByEmail.get(email);
+        const contact = contactId ? contactMap.get(contactId) : undefined;
+        const contactName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ');
+        return {
+          email,
+          displayName: contactName || info.sampleName || null,
+          projectCount: info.projectCount,
+          weeklyUpdate: prefMap.has(email) ? prefMap.get(email)! : true,
+          registered: contactIdByEmail.has(email) || registeredUsers.some(u => u.email === email)
+        };
+      })
+      .sort((a, b) => a.email.localeCompare(b.email));
+
+    logger.info('Admin fetched weekly digest clients', { count: clients.length });
+
+    res.json({ success: true, clients, total: clients.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/admin/weekly-digest/clients - Enable/disable the weekly digest for one client
+router.patch('/weekly-digest/clients', async (req, res, next) => {
+  try {
+    const { email, enabled } = z.object({
+      email: z.string().email(),
+      enabled: z.boolean()
+    }).parse(req.body);
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const prefs = await prisma.notificationPreference.upsert({
+      where: { email: normalizedEmail },
+      create: { email: normalizedEmail, weeklyUpdate: enabled },
+      update: { weeklyUpdate: enabled }
+    });
+
+    logger.info('Admin updated client weekly digest preference', { email: normalizedEmail, enabled });
+
+    res.json({ success: true, email: prefs.email, weeklyUpdate: prefs.weeklyUpdate });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid request - expected { email, enabled }', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// PATCH /api/admin/weekly-digest/clients/bulk - Enable/disable the weekly digest for many clients
+router.patch('/weekly-digest/clients/bulk', async (req, res, next) => {
+  try {
+    const { emails, enabled } = z.object({
+      emails: z.array(z.string().email()).min(1, 'At least one client must be selected'),
+      enabled: z.boolean()
+    }).parse(req.body);
+
+    const normalized = [...new Set(emails.map(e => e.toLowerCase().trim()))];
+
+    await Promise.all(
+      normalized.map(email =>
+        prisma.notificationPreference.upsert({
+          where: { email },
+          create: { email, weeklyUpdate: enabled },
+          update: { weeklyUpdate: enabled }
+        })
+      )
+    );
+
+    logger.info('Admin bulk-updated client weekly digest preferences', { count: normalized.length, enabled });
+
+    res.json({ success: true, updated: normalized.length, enabled });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError(error.errors[0]?.message || 'Invalid request', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// ─── Digest schedules ──────────────────────────────────────────────────
+
+const timezoneSchema = z.enum(ALLOWED_TIMEZONES as [string, ...string[]]);
+
+// GET /api/admin/weekly-digest/schedule - When the client weekly digest sends
+router.get('/weekly-digest/schedule', async (_req, res, next) => {
+  try {
+    const schedule = await getWeeklyClientDigestSchedule();
+    res.json({ success: true, schedule, timezones: ALLOWED_TIMEZONES });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/admin/weekly-digest/schedule - Update the client weekly digest schedule
+router.put('/weekly-digest/schedule', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      dayOfWeek: z.number().int().min(0).max(6),
+      hour: z.number().int().min(0).max(23),
+      minute: z.number().int().min(0).max(59),
+      timezone: timezoneSchema
+    });
+    const input = schema.parse(req.body);
+
+    const schedule = await setWeeklyClientDigestSchedule(input);
+    await scheduleClientDigest();
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_set_weekly_digest_schedule',
+        entityType: 'setting',
+        entityId: 'weeklyClientDigestSchedule',
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { ...schedule },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin updated client weekly digest schedule', { schedule });
+    res.json({ success: true, schedule });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid schedule - check day, time, and timezone', 400));
+    } else {
+      next(error);
+    }
+  }
+});
+
+// GET /api/admin/upload-digest/schedule - When the admin upload digest sends
+router.get('/upload-digest/schedule', async (_req, res, next) => {
+  try {
+    const schedule = await getUploadDigestSchedule();
+    res.json({ success: true, schedule, timezones: ALLOWED_TIMEZONES });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/admin/upload-digest/schedule - Update the admin upload digest schedule
+router.put('/upload-digest/schedule', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      hour: z.number().int().min(0).max(23),
+      minute: z.number().int().min(0).max(59),
+      weeklyDayOfWeek: z.number().int().min(0).max(6),
+      timezone: timezoneSchema
+    });
+    const input = schema.parse(req.body);
+
+    const schedule = await setUploadDigestSchedule(input);
+    await scheduleUploadDigest();
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'admin_set_upload_digest_schedule',
+        entityType: 'setting',
+        entityId: 'adminUploadDigestSchedule',
+        userEmail: 'admin',
+        userType: 'admin',
+        details: { ...schedule },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin updated upload digest schedule', { schedule });
+    res.json({ success: true, schedule });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      next(new AppError('Invalid schedule - check day, time, and timezone', 400));
     } else {
       next(error);
     }

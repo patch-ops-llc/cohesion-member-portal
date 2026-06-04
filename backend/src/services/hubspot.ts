@@ -400,6 +400,48 @@ export async function getAllContacts(limit: number = 100, after?: string): Promi
   }
 }
 
+// Batch-fetch contacts by their HubSpot IDs (chunks of 100).
+// Returns a map keyed by contact id for quick name/email lookups.
+export async function getContactsByIds(ids: string[]): Promise<Map<string, ContactInfo>> {
+  const result = new Map<string, ContactInfo>();
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (uniqueIds.length === 0) return result;
+
+  for (let i = 0; i < uniqueIds.length; i += 100) {
+    const chunk = uniqueIds.slice(i, i + 100);
+    try {
+      const response = await axios.post<{
+        results?: Array<{ id: string; properties: Record<string, string> }>;
+      }>(
+        'https://api.hubapi.com/crm/v3/objects/contacts/batch/read',
+        {
+          properties: ['email', 'firstname', 'lastname'],
+          inputs: chunk.map(id => ({ id }))
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      for (const c of response.data?.results || []) {
+        result.set(c.id, {
+          id: c.id,
+          email: c.properties.email || '',
+          firstName: c.properties.firstname?.trim() || undefined,
+          lastName: c.properties.lastname?.trim() || undefined
+        });
+      }
+    } catch (error) {
+      logger.warn('Failed to batch-read contacts (continuing)', { count: chunk.length, error: String(error) });
+    }
+  }
+
+  return result;
+}
+
 // Search contacts by query string (uses HubSpot search API)
 export async function searchContacts(query: string, limit: number = 10): Promise<ContactInfo[]> {
   try {

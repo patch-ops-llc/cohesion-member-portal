@@ -136,6 +136,41 @@ export interface AdminNotificationPreferences {
   adminUploadDigest: UploadDigestFrequency;
 }
 
+// Registered portal user (for the admin registration audit)
+export interface RegisteredUser {
+  id: string;
+  email: string;
+  displayName: string | null;
+  hubspotContactId: string | null;
+  registeredAt: string;
+  lastLoginAt: string | null;
+}
+
+// A client (project email) and their weekly-digest opt-in state
+export interface WeeklyDigestClient {
+  email: string;
+  displayName: string | null;
+  projectCount: number;
+  weeklyUpdate: boolean;
+  registered: boolean;
+}
+
+// Schedule for the client weekly digest (one weekly send)
+export interface WeeklyClientDigestSchedule {
+  dayOfWeek: number; // 0 = Sunday … 6 = Saturday
+  hour: number;
+  minute: number;
+  timezone: string;
+}
+
+// Schedule for the admin upload digest (daily time + weekly day)
+export interface UploadDigestSchedule {
+  hour: number;
+  minute: number;
+  weeklyDayOfWeek: number;
+  timezone: string;
+}
+
 // Email template
 export interface EmailTemplate {
   id: string;

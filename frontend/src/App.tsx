@@ -26,6 +26,7 @@ import { Dashboard } from './components/admin/Dashboard';
 import { ProjectManager } from './components/admin/ProjectManager';
 import { ProjectEditor } from './components/admin/ProjectEditor';
 import { AuditLog } from './components/admin/AuditLog';
+import { RegisteredUsers } from './components/admin/RegisteredUsers';
 import { AdminNotificationSettings } from './components/admin/NotificationSettings';
 import { EmailTemplateSettings } from './components/admin/EmailTemplateSettings';
 
@@ -119,6 +120,14 @@ function App() {
                 element={
                   <AdminRoute>
                     <ProjectEditor />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/registered-users"
+                element={
+                  <AdminRoute>
+                    <RegisteredUsers />
                   </AdminRoute>
                 }
               />
