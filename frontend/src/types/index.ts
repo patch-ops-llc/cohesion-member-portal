@@ -94,11 +94,11 @@ export interface CategoryDefinition {
 export const personalCategories: CategoryDefinition[] = [
   { key: 'w_2s', label: 'W-2s' },
   { key: '1099s', label: '1099s' },
-  { key: 'k_1s', label: 'K-1s' },
+  { key: 'schedule_c', label: 'Schedule C' },
+  { key: 'schedule_e', label: 'Schedule E' },
   { key: 'property_expenses', label: 'Property Expenses' },
   { key: '1098s', label: '1098s' },
   { key: 'charitable_donations', label: 'Charitable Donations' },
-  { key: 'additional_documents', label: 'Additional Documents' },
   { key: 'livestock_sales_and_expenses', label: 'Livestock Sales and Expenses' },
   { key: 'foreign_bank_accounts', label: 'Foreign Bank Accounts' },
   { key: 'previous_personal_tax_returns', label: 'Previous Personal Tax Returns' }
@@ -107,12 +107,15 @@ export const personalCategories: CategoryDefinition[] = [
 export const entityCategories: CategoryDefinition[] = [
   { key: 'entity_income', label: 'Entity Income' },
   { key: 'entity_expenses', label: 'Entity Expenses' },
+  { key: 'k_1s', label: 'K-1s' },
+  { key: 'vehicle_mileage', label: 'Vehicle Mileage' },
   { key: 'balance_sheet', label: 'Balance Sheet' },
   { key: 'p_l', label: 'P&L' },
   { key: 'trial_balance', label: 'Trial Balance' },
   { key: 'general_ledger', label: 'General Ledger' },
   { key: 'additions_and_disposals', label: 'Additions and Disposals' },
   { key: 'business_operation_agreement', label: 'Business Operation Agreement' },
+  { key: 'additional_documents', label: 'Additional Documents' },
   { key: 'previous_entity_tax_returns', label: 'Previous Entity Tax Returns' }
 ];
 

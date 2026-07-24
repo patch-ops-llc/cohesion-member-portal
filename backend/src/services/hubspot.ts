@@ -10,6 +10,9 @@ const hubspotClient = new Client({
 
 const CUSTOM_OBJECT_TYPE = process.env.HUBSPOT_CUSTOM_OBJECT_TYPE || '2-171216725';
 const HUBSPOT_PORTAL_ID = process.env.HUBSPOT_PORTAL_ID || '242796132';
+/** HubSpot date property on p_client_projects (label: Documents Accepted Date) */
+const DOCUMENTS_ACCEPTED_DATE_PROP =
+  process.env.HUBSPOT_DOCUMENTS_ACCEPTED_DATE_PROPERTY || 'documents_accepted_date';
 
 // Build the canonical HubSpot File Manager URL for a folder.
 // HubSpot expects: https://app-na2.hubspot.com/files/<portalId>/?folderId=<folderId>
@@ -150,19 +153,110 @@ export async function getAllProjects(): Promise<{ projects: Project[] }> {
   }
 }
 
-// Update document_data field
+/**
+ * True when every active category has at least one document and every
+ * document in those categories is status "accepted". Inactive categories
+ * are ignored. Used to drive the HubSpot Documents Accepted Date property.
+ */
+export function areAllActiveDocumentsAccepted(documentData: DocumentData): boolean {
+  let activeDocCount = 0;
+
+  for (const key of Object.keys(documentData)) {
+    if (key === '_meta') continue;
+
+    const category = documentData[key] as CategoryData;
+    if (!category || category.status !== 'active') continue;
+
+    const docs = category.documents || [];
+    if (docs.length === 0) return false;
+
+    for (const doc of docs) {
+      activeDocCount += 1;
+      if (doc.status !== 'accepted') return false;
+    }
+  }
+
+  return activeDocCount > 0;
+}
+
+/** Calendar date in America/Chicago as HubSpot date property value (midnight UTC ms). */
+function hubSpotDateTodayCentral(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+  const year = Number(parts.find((p) => p.type === 'year')?.value);
+  const month = Number(parts.find((p) => p.type === 'month')?.value);
+  const day = Number(parts.find((p) => p.type === 'day')?.value);
+  return String(Date.UTC(year, month - 1, day));
+}
+
+// Update document_data field, and sync Documents Accepted Date when all active docs are accepted
 export async function updateDocumentData(projectId: string, documentData: DocumentData): Promise<void> {
+  const documentDataJson = JSON.stringify(documentData);
+
   try {
-    await hubspotClient.crm.objects.basicApi.update(
-      CUSTOM_OBJECT_TYPE,
-      projectId,
-      {
-        properties: {
-          document_data: JSON.stringify(documentData)
+    const allAccepted = areAllActiveDocumentsAccepted(documentData);
+    const properties: Record<string, string> = {
+      document_data: documentDataJson
+    };
+
+    if (allAccepted) {
+      // Stamp once on first completion; do not bump the date on later saves
+      try {
+        const current = await hubspotClient.crm.objects.basicApi.getById(
+          CUSTOM_OBJECT_TYPE,
+          projectId,
+          [DOCUMENTS_ACCEPTED_DATE_PROP]
+        );
+        const existing = current.properties?.[DOCUMENTS_ACCEPTED_DATE_PROP];
+        if (!existing) {
+          properties[DOCUMENTS_ACCEPTED_DATE_PROP] = hubSpotDateTodayCentral();
         }
+      } catch (dateReadError) {
+        // Property missing or unreadable — still save document_data
+        logger.warn('Could not read Documents Accepted Date; skipping date sync', {
+          projectId,
+          property: DOCUMENTS_ACCEPTED_DATE_PROP,
+          error: String(dateReadError)
+        });
       }
-    );
-    logger.info('Updated document_data in HubSpot', { projectId });
+    } else {
+      // Clear so task workflows keyed off this date do not fire on stale values
+      properties[DOCUMENTS_ACCEPTED_DATE_PROP] = '';
+    }
+
+    try {
+      await hubspotClient.crm.objects.basicApi.update(
+        CUSTOM_OBJECT_TYPE,
+        projectId,
+        { properties }
+      );
+    } catch (updateError) {
+      // If date property is invalid/missing, fall back to document_data only
+      if (DOCUMENTS_ACCEPTED_DATE_PROP in properties && Object.keys(properties).length > 1) {
+        logger.warn('Documents Accepted Date update failed; saving document_data only', {
+          projectId,
+          property: DOCUMENTS_ACCEPTED_DATE_PROP,
+          error: String(updateError)
+        });
+        await hubspotClient.crm.objects.basicApi.update(
+          CUSTOM_OBJECT_TYPE,
+          projectId,
+          { properties: { document_data: documentDataJson } }
+        );
+      } else {
+        throw updateError;
+      }
+    }
+
+    logger.info('Updated document_data in HubSpot', {
+      projectId,
+      allDocumentsAccepted: allAccepted,
+      documentsAcceptedDateSet: Boolean(properties[DOCUMENTS_ACCEPTED_DATE_PROP])
+    });
   } catch (error) {
     logger.error('Failed to update document_data', { projectId, error: String(error) });
     throw error;
