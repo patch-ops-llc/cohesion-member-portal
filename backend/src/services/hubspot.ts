@@ -154,12 +154,13 @@ export async function getAllProjects(): Promise<{ projects: Project[] }> {
 }
 
 /**
- * True when every active category has at least one document and every
- * document in those categories is status "accepted". Inactive categories
- * are ignored. Used to drive the HubSpot Documents Accepted Date property.
+ * Documents that block "all accepted" completion.
+ * Active categories with zero documents are ignored (common when a category
+ * is toggled on as a placeholder with no named docs yet).
  */
-export function areAllActiveDocumentsAccepted(documentData: DocumentData): boolean {
-  let activeDocCount = 0;
+export function getDocumentAcceptanceBlockers(documentData: DocumentData): string[] {
+  const blockers: string[] = [];
+  let namedDocCount = 0;
 
   for (const key of Object.keys(documentData)) {
     if (key === '_meta') continue;
@@ -167,19 +168,33 @@ export function areAllActiveDocumentsAccepted(documentData: DocumentData): boole
     const category = documentData[key] as CategoryData;
     if (!category || category.status !== 'active') continue;
 
-    const docs = category.documents || [];
-    if (docs.length === 0) return false;
+    const docs = (category.documents || []).filter((doc) => (doc.name || '').trim() !== '');
+    if (docs.length === 0) continue;
 
     for (const doc of docs) {
-      activeDocCount += 1;
-      if (doc.status !== 'accepted') return false;
+      namedDocCount += 1;
+      if (doc.status !== 'accepted') {
+        blockers.push(`${key}: "${doc.name}" (${doc.status || 'unknown'})`);
+      }
     }
   }
 
-  return activeDocCount > 0;
+  if (namedDocCount === 0) {
+    blockers.push('no_named_documents');
+  }
+
+  return blockers;
 }
 
-/** Calendar date in America/Chicago as HubSpot date property value (midnight UTC ms). */
+/**
+ * True when every named document in every active category is status "accepted".
+ * Empty active categories do not block completion.
+ */
+export function areAllActiveDocumentsAccepted(documentData: DocumentData): boolean {
+  return getDocumentAcceptanceBlockers(documentData).length === 0;
+}
+
+/** Calendar date in America/Chicago as HubSpot date property value (YYYY-MM-DD). */
 function hubSpotDateTodayCentral(): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Chicago',
@@ -187,10 +202,10 @@ function hubSpotDateTodayCentral(): string {
     month: '2-digit',
     day: '2-digit'
   }).formatToParts(new Date());
-  const year = Number(parts.find((p) => p.type === 'year')?.value);
-  const month = Number(parts.find((p) => p.type === 'month')?.value);
-  const day = Number(parts.find((p) => p.type === 'day')?.value);
-  return String(Date.UTC(year, month - 1, day));
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+  return `${year}-${month}-${day}`;
 }
 
 // Update document_data field, and sync Documents Accepted Date when all active docs are accepted
@@ -198,7 +213,8 @@ export async function updateDocumentData(projectId: string, documentData: Docume
   const documentDataJson = JSON.stringify(documentData);
 
   try {
-    const allAccepted = areAllActiveDocumentsAccepted(documentData);
+    const blockers = getDocumentAcceptanceBlockers(documentData);
+    const allAccepted = blockers.length === 0;
     const properties: Record<string, string> = {
       document_data: documentDataJson
     };
@@ -255,7 +271,8 @@ export async function updateDocumentData(projectId: string, documentData: Docume
     logger.info('Updated document_data in HubSpot', {
       projectId,
       allDocumentsAccepted: allAccepted,
-      documentsAcceptedDateSet: Boolean(properties[DOCUMENTS_ACCEPTED_DATE_PROP])
+      documentsAcceptedDateSet: Boolean(properties[DOCUMENTS_ACCEPTED_DATE_PROP]),
+      acceptanceBlockers: allAccepted ? undefined : blockers.slice(0, 10)
     });
   } catch (error) {
     logger.error('Failed to update document_data', { projectId, error: String(error) });
