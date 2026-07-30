@@ -31,6 +31,7 @@ const personalCategories = [
   { key: 'charitable_donations', label: 'Charitable Donations' },
   { key: 'livestock_sales_and_expenses', label: 'Livestock Sales and Expenses' },
   { key: 'foreign_bank_accounts', label: 'Foreign Bank Accounts' },
+  { key: 'additional_documents', label: 'Additional Documents' },
   { key: 'previous_personal_tax_returns', label: 'Previous Personal Tax Returns' }
 ];
 
@@ -49,7 +50,10 @@ const entityCategories = [
   { key: 'previous_entity_tax_returns', label: 'Previous Entity Tax Returns' }
 ];
 
-const allCategories = [...personalCategories, ...entityCategories];
+const allCategories = [
+  ...personalCategories,
+  ...entityCategories.filter((c) => !personalCategories.some((p) => p.key === c.key))
+];
 
 const statusOptions = [
   { value: 'not_submitted', label: 'Not Submitted' },
@@ -71,6 +75,7 @@ function DocumentChecklistCard({ context }) {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState('');
   const [autoSaveTrigger, setAutoSaveTrigger] = useState(0);
+  const [documentsAcceptedDate, setDocumentsAcceptedDate] = useState('');
 
   const [modifiedFields, setModifiedFields] = useState({
     sections: false,
@@ -94,6 +99,7 @@ function DocumentChecklistCard({ context }) {
       const res = await hubspot.fetch(`${BACKEND_URL}/api/cards/projects/${recordId}`);
       const data = await res.json();
       const documentData = data.documentData || data;
+      setDocumentsAcceptedDate(data.documentsAcceptedDate || '');
 
       if (!documentData || typeof documentData !== 'object') {
         setDocumentInputs({});
@@ -435,6 +441,16 @@ function DocumentChecklistCard({ context }) {
       {success && (
         <Alert title="Success" variant="success">
           {success}
+        </Alert>
+      )}
+
+      {documentsAcceptedDate ? (
+        <Alert title="Documents Accepted Date" variant="success">
+          {documentsAcceptedDate}
+        </Alert>
+      ) : (
+        <Alert title="Documents Accepted Date" variant="info">
+          Not set — fills automatically when every named document is Accepted
         </Alert>
       )}
 

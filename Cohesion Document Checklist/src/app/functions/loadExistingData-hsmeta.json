@@ -1,0 +1,11 @@
+{
+  "uid": "function-loadExistingData",
+  "type": "app-function",
+  "config": {
+    "entrypoint": "/app/functions/loadExistingData.js",
+    "endpoint": {
+      "path": "loadExistingData",
+      "methods": ["POST"]
+    }
+  }
+}

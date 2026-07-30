@@ -1,0 +1,11 @@
+{
+  "uid": "function-saveDocuments",
+  "type": "app-function",
+  "config": {
+    "entrypoint": "/app/functions/saveDocuments.js",
+    "endpoint": {
+      "path": "saveDocuments",
+      "methods": ["POST"]
+    }
+  }
+}

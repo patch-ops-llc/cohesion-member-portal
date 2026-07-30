@@ -1,0 +1,11 @@
+{
+  "uid": "function-updateCategorySelection",
+  "type": "app-function",
+  "config": {
+    "entrypoint": "/app/functions/updateCategorySelection.js",
+    "endpoint": {
+      "path": "updateCategorySelection",
+      "methods": ["POST"]
+    }
+  }
+}
