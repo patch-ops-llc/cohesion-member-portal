@@ -21,9 +21,21 @@ router.get('/projects/:id', async (req, res, next) => {
     const project = await hubspot.getProject(id);
     const documentData = hubspot.parseDocumentData(project.properties.document_data);
 
-    logger.info('Card fetch', { projectId: id });
+    // On load: if every named doc is accepted, never leave Documents Accepted Date empty.
+    // Backfill from last document_data edit when missing.
+    const documentsAcceptedDate = await hubspot.syncDocumentsAcceptedDate(id, documentData);
 
-    res.json({ documentData, email: project.properties.email || null });
+    logger.info('Card fetch', {
+      projectId: id,
+      allDocumentsAccepted: hubspot.areAllActiveDocumentsAccepted(documentData),
+      documentsAcceptedDate
+    });
+
+    res.json({
+      documentData,
+      email: project.properties.email || null,
+      documentsAcceptedDate
+    });
   } catch (error) {
     next(error);
   }

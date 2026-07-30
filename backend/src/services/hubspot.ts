@@ -195,17 +195,127 @@ export function areAllActiveDocumentsAccepted(documentData: DocumentData): boole
 }
 
 /** Calendar date in America/Chicago as HubSpot date property value (YYYY-MM-DD). */
-function hubSpotDateTodayCentral(): string {
+export function toHubSpotDateCentral(date: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Chicago',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
-  }).formatToParts(new Date());
+  }).formatToParts(date);
   const year = parts.find((p) => p.type === 'year')?.value;
   const month = parts.find((p) => p.type === 'month')?.value;
   const day = parts.find((p) => p.type === 'day')?.value;
   return `${year}-${month}-${day}`;
+}
+
+/**
+ * Last time document_data (checklist) was edited, as a HubSpot date (YYYY-MM-DD Central).
+ * Falls back to hs_lastmodifieddate, then today.
+ */
+export async function getLastChecklistEditDate(projectId: string): Promise<string> {
+  try {
+    const response = await axios.get(
+      `https://api.hubapi.com/crm/v3/objects/${CUSTOM_OBJECT_TYPE}/${projectId}`,
+      {
+        headers: { Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}` },
+        params: {
+          properties: 'hs_lastmodifieddate',
+          propertiesWithHistory: 'document_data'
+        }
+      }
+    );
+
+    const history = response.data?.propertiesWithHistory?.document_data;
+    if (Array.isArray(history) && history.length > 0 && history[0]?.timestamp) {
+      return toHubSpotDateCentral(new Date(history[0].timestamp));
+    }
+
+    const lastModified = response.data?.properties?.hs_lastmodifieddate;
+    if (lastModified) {
+      return toHubSpotDateCentral(new Date(lastModified));
+    }
+  } catch (error) {
+    logger.warn('Could not resolve last checklist edit date; using today', {
+      projectId,
+      error: String(error)
+    });
+  }
+
+  return toHubSpotDateCentral();
+}
+
+async function writeDocumentsAcceptedDate(projectId: string, value: string): Promise<void> {
+  await hubspotClient.crm.objects.basicApi.update(
+    CUSTOM_OBJECT_TYPE,
+    projectId,
+    { properties: { [DOCUMENTS_ACCEPTED_DATE_PROP]: value } }
+  );
+}
+
+/**
+ * Enforce Documents Accepted Date from current checklist state.
+ * - All accepted + empty date → set to last checklist edit date (never leave empty)
+ * - Not all accepted → clear date
+ * Returns the date value after sync (null if cleared / not applicable).
+ */
+export async function syncDocumentsAcceptedDate(
+  projectId: string,
+  documentData: DocumentData,
+  options: { existingDate?: string | null; editDate?: string } = {}
+): Promise<string | null> {
+  const blockers = getDocumentAcceptanceBlockers(documentData);
+  const allAccepted = blockers.length === 0;
+
+  let existing = options.existingDate;
+  if (existing === undefined) {
+    try {
+      const current = await hubspotClient.crm.objects.basicApi.getById(
+        CUSTOM_OBJECT_TYPE,
+        projectId,
+        [DOCUMENTS_ACCEPTED_DATE_PROP]
+      );
+      existing = current.properties?.[DOCUMENTS_ACCEPTED_DATE_PROP] || null;
+    } catch (error) {
+      logger.warn('Could not read Documents Accepted Date', {
+        projectId,
+        error: String(error)
+      });
+      existing = null;
+    }
+  }
+
+  try {
+    if (allAccepted) {
+      if (existing) {
+        return existing;
+      }
+
+      const dateValue = options.editDate || (await getLastChecklistEditDate(projectId));
+      await writeDocumentsAcceptedDate(projectId, dateValue);
+      logger.info('Backfilled Documents Accepted Date', {
+        projectId,
+        documentsAcceptedDate: dateValue,
+        source: options.editDate ? 'current_edit' : 'last_checklist_edit'
+      });
+      return dateValue;
+    }
+
+    if (existing) {
+      await writeDocumentsAcceptedDate(projectId, '');
+      logger.info('Cleared Documents Accepted Date (checklist incomplete)', {
+        projectId,
+        acceptanceBlockers: blockers.slice(0, 10)
+      });
+    }
+    return null;
+  } catch (error) {
+    logger.warn('Documents Accepted Date sync failed', {
+      projectId,
+      allAccepted,
+      error: String(error)
+    });
+    return existing || null;
+  }
 }
 
 // Update document_data field, and sync Documents Accepted Date when all active docs are accepted
@@ -215,63 +325,22 @@ export async function updateDocumentData(projectId: string, documentData: Docume
   try {
     const blockers = getDocumentAcceptanceBlockers(documentData);
     const allAccepted = blockers.length === 0;
-    const properties: Record<string, string> = {
-      document_data: documentDataJson
-    };
 
-    if (allAccepted) {
-      // Stamp once on first completion; do not bump the date on later saves
-      try {
-        const current = await hubspotClient.crm.objects.basicApi.getById(
-          CUSTOM_OBJECT_TYPE,
-          projectId,
-          [DOCUMENTS_ACCEPTED_DATE_PROP]
-        );
-        const existing = current.properties?.[DOCUMENTS_ACCEPTED_DATE_PROP];
-        if (!existing) {
-          properties[DOCUMENTS_ACCEPTED_DATE_PROP] = hubSpotDateTodayCentral();
-        }
-      } catch (dateReadError) {
-        // Property missing or unreadable — still save document_data
-        logger.warn('Could not read Documents Accepted Date; skipping date sync', {
-          projectId,
-          property: DOCUMENTS_ACCEPTED_DATE_PROP,
-          error: String(dateReadError)
-        });
-      }
-    } else {
-      // Clear so task workflows keyed off this date do not fire on stale values
-      properties[DOCUMENTS_ACCEPTED_DATE_PROP] = '';
-    }
+    await hubspotClient.crm.objects.basicApi.update(
+      CUSTOM_OBJECT_TYPE,
+      projectId,
+      { properties: { document_data: documentDataJson } }
+    );
 
-    try {
-      await hubspotClient.crm.objects.basicApi.update(
-        CUSTOM_OBJECT_TYPE,
-        projectId,
-        { properties }
-      );
-    } catch (updateError) {
-      // If date property is invalid/missing, fall back to document_data only
-      if (DOCUMENTS_ACCEPTED_DATE_PROP in properties && Object.keys(properties).length > 1) {
-        logger.warn('Documents Accepted Date update failed; saving document_data only', {
-          projectId,
-          property: DOCUMENTS_ACCEPTED_DATE_PROP,
-          error: String(updateError)
-        });
-        await hubspotClient.crm.objects.basicApi.update(
-          CUSTOM_OBJECT_TYPE,
-          projectId,
-          { properties: { document_data: documentDataJson } }
-        );
-      } else {
-        throw updateError;
-      }
-    }
+    // Current card/admin edit is the latest checklist edit when all are accepted
+    const documentsAcceptedDate = await syncDocumentsAcceptedDate(projectId, documentData, {
+      editDate: allAccepted ? toHubSpotDateCentral() : undefined
+    });
 
     logger.info('Updated document_data in HubSpot', {
       projectId,
       allDocumentsAccepted: allAccepted,
-      documentsAcceptedDateSet: Boolean(properties[DOCUMENTS_ACCEPTED_DATE_PROP]),
+      documentsAcceptedDate,
       acceptanceBlockers: allAccepted ? undefined : blockers.slice(0, 10)
     });
   } catch (error) {
