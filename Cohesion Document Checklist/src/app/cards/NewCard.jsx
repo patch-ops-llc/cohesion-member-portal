@@ -131,16 +131,26 @@ const Extension = ({ context, runServerlessFunction, actions }) => {
       }
       
       // Check if the response doesn't have the expected data
-      if (result.status !== 'SUCCESS' || !result.response?.data) {
-        console.error('loadExistingData failed:', result);
-        const errorMsg = result.response?.message || result.message || 'Failed to load data';
+      // HubSpot may nest function return as result.response or result.response.data
+      const functionPayload = result.response?.data || result.response || result.data || result;
+      const functionStatus = functionPayload?.status || result.response?.status || result.status;
+      const functionData = functionPayload?.data || functionPayload;
+
+      if (functionStatus === 'ERROR') {
+        console.error('loadExistingData function returned ERROR:', result);
+        throw new Error(functionPayload?.message || result.response?.message || 'Failed to load data');
+      }
+
+      if (functionStatus !== 'SUCCESS' || !functionData?.properties) {
+        console.error('loadExistingData failed / unexpected shape:', JSON.stringify(result));
+        const errorMsg = functionPayload?.message || result.response?.message || result.message || 'Failed to load data';
         throw new Error(errorMsg);
       }
 
-      const properties = result.response.data.properties;
+      const properties = functionData.properties;
       const documentDataJson = properties.document_data;
       const acceptedDate =
-        result.response.data.documentsAcceptedDate ||
+        functionData.documentsAcceptedDate ||
         properties.documents_accepted_date ||
         '';
       setDocumentsAcceptedDate(acceptedDate || '');
@@ -216,7 +226,7 @@ const Extension = ({ context, runServerlessFunction, actions }) => {
       
     } catch (err) {
       console.error('Error loading data:', err);
-      setError('Failed to load existing data. Please refresh the page.');
+      setError(`Failed to load existing data: ${err.message || 'Please refresh the page.'}`);
     } finally {
       setLoading(false);
     }

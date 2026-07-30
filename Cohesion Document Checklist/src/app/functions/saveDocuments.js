@@ -1,9 +1,68 @@
 const hubspot = require('@hubspot/api-client');
-const {
-  DOCUMENTS_ACCEPTED_DATE_PROP,
-  toHubSpotDateCentral,
-  buildDocumentsAcceptedDateProperties
-} = require('./documentsAcceptedDate');
+
+const DOCUMENTS_ACCEPTED_DATE_PROP = 'documents_accepted_date';
+
+function getDocumentAcceptanceBlockers(documentData) {
+  const blockers = [];
+  let namedDocCount = 0;
+
+  for (const key of Object.keys(documentData || {})) {
+    if (key === '_meta') continue;
+    const category = documentData[key];
+    if (!category || category.status !== 'active') continue;
+
+    const docs = (category.documents || []).filter((doc) => (doc.name || '').trim() !== '');
+    if (docs.length === 0) continue;
+
+    for (const doc of docs) {
+      namedDocCount += 1;
+      if (doc.status !== 'accepted') {
+        blockers.push(`${key}: "${doc.name}" (${doc.status || 'unknown'})`);
+      }
+    }
+  }
+
+  if (namedDocCount === 0) {
+    blockers.push('no_named_documents');
+  }
+
+  return blockers;
+}
+
+function toHubSpotDateCentral(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+  return `${year}-${month}-${day}`;
+}
+
+function buildDocumentsAcceptedDateProperties(documentData, existingDate, dateValue) {
+  const allAccepted = getDocumentAcceptanceBlockers(documentData).length === 0;
+  const properties = {};
+
+  if (allAccepted) {
+    if (!existingDate) {
+      properties[DOCUMENTS_ACCEPTED_DATE_PROP] = dateValue || toHubSpotDateCentral();
+    }
+  } else if (existingDate) {
+    properties[DOCUMENTS_ACCEPTED_DATE_PROP] = '';
+  }
+
+  return {
+    allAccepted,
+    properties,
+    documentsAcceptedDate: allAccepted
+      ? (existingDate || properties[DOCUMENTS_ACCEPTED_DATE_PROP] || null)
+      : null
+  };
+}
 
 exports.main = async (context = {}) => {
   try {
@@ -35,49 +94,76 @@ exports.main = async (context = {}) => {
       };
     }
 
-    // Read current date so we only stamp once / clear when incomplete
-    let existingDate = null;
-    try {
-      const current = await hubspotClient.crm.objects.basicApi.getById(
-        'p_client_projects',
-        objectId,
-        [DOCUMENTS_ACCEPTED_DATE_PROP]
-      );
-      existingDate = current.properties?.[DOCUMENTS_ACCEPTED_DATE_PROP] || null;
-    } catch (readError) {
-      console.warn('Could not read documents_accepted_date:', readError.message);
-    }
-
-    const sync = buildDocumentsAcceptedDateProperties(
-      documentData,
-      existingDate,
-      toHubSpotDateCentral()
-    );
-
     const properties = {
-      document_data: typeof allDataJson === 'string' ? allDataJson : JSON.stringify(allDataJson),
-      ...sync.properties
+      document_data: typeof allDataJson === 'string' ? allDataJson : JSON.stringify(allDataJson)
     };
 
-    console.log('Saving document_data + accepted-date sync', {
-      objectId,
-      allAccepted: sync.allAccepted,
-      documentsAcceptedDate: sync.documentsAcceptedDate,
-      dateProps: sync.properties
-    });
+    let allAccepted = false;
+    let documentsAcceptedDate = null;
 
-    await hubspotClient.crm.objects.basicApi.update(
-      'p_client_projects',
-      objectId,
-      { properties }
-    );
+    // Date sync must never block document_data save
+    try {
+      let existingDate = null;
+      try {
+        const current = await hubspotClient.crm.objects.basicApi.getById(
+          'p_client_projects',
+          objectId,
+          [DOCUMENTS_ACCEPTED_DATE_PROP]
+        );
+        existingDate = current.properties?.[DOCUMENTS_ACCEPTED_DATE_PROP] || null;
+      } catch (readError) {
+        console.warn('Could not read documents_accepted_date:', readError.message);
+      }
+
+      const sync = buildDocumentsAcceptedDateProperties(
+        documentData,
+        existingDate,
+        toHubSpotDateCentral()
+      );
+      allAccepted = sync.allAccepted;
+      documentsAcceptedDate = sync.documentsAcceptedDate;
+      Object.assign(properties, sync.properties);
+
+      console.log('Saving document_data + accepted-date sync', {
+        objectId,
+        allAccepted: sync.allAccepted,
+        documentsAcceptedDate: sync.documentsAcceptedDate,
+        dateProps: sync.properties
+      });
+    } catch (syncError) {
+      console.warn('Documents Accepted Date sync failed on save; saving document_data only', syncError);
+    }
+
+    try {
+      await hubspotClient.crm.objects.basicApi.update(
+        'p_client_projects',
+        objectId,
+        { properties }
+      );
+    } catch (updateError) {
+      // If date property write fails, retry with document_data only
+      if (DOCUMENTS_ACCEPTED_DATE_PROP in properties) {
+        console.warn('Update with date failed; retrying document_data only', updateError.message);
+        await hubspotClient.crm.objects.basicApi.update(
+          'p_client_projects',
+          objectId,
+          {
+            properties: {
+              document_data: properties.document_data
+            }
+          }
+        );
+      } else {
+        throw updateError;
+      }
+    }
 
     return {
       status: 'SUCCESS',
       data: {
         message: 'Documents saved successfully',
-        allAccepted: sync.allAccepted,
-        documentsAcceptedDate: sync.documentsAcceptedDate
+        allAccepted,
+        documentsAcceptedDate
       }
     };
   } catch (error) {

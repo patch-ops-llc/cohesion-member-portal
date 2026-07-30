@@ -1,9 +1,68 @@
 const hubspot = require('@hubspot/api-client');
-const {
-  DOCUMENTS_ACCEPTED_DATE_PROP,
-  buildDocumentsAcceptedDateProperties,
-  toHubSpotDateCentral
-} = require('./documentsAcceptedDate');
+
+const DOCUMENTS_ACCEPTED_DATE_PROP = 'documents_accepted_date';
+
+function getDocumentAcceptanceBlockers(documentData) {
+  const blockers = [];
+  let namedDocCount = 0;
+
+  for (const key of Object.keys(documentData || {})) {
+    if (key === '_meta') continue;
+    const category = documentData[key];
+    if (!category || category.status !== 'active') continue;
+
+    const docs = (category.documents || []).filter((doc) => (doc.name || '').trim() !== '');
+    if (docs.length === 0) continue;
+
+    for (const doc of docs) {
+      namedDocCount += 1;
+      if (doc.status !== 'accepted') {
+        blockers.push(`${key}: "${doc.name}" (${doc.status || 'unknown'})`);
+      }
+    }
+  }
+
+  if (namedDocCount === 0) {
+    blockers.push('no_named_documents');
+  }
+
+  return blockers;
+}
+
+function toHubSpotDateCentral(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+  return `${year}-${month}-${day}`;
+}
+
+function buildDocumentsAcceptedDateProperties(documentData, existingDate, dateValue) {
+  const allAccepted = getDocumentAcceptanceBlockers(documentData).length === 0;
+  const properties = {};
+
+  if (allAccepted) {
+    if (!existingDate) {
+      properties[DOCUMENTS_ACCEPTED_DATE_PROP] = dateValue || toHubSpotDateCentral();
+    }
+  } else if (existingDate) {
+    properties[DOCUMENTS_ACCEPTED_DATE_PROP] = '';
+  }
+
+  return {
+    allAccepted,
+    properties,
+    documentsAcceptedDate: allAccepted
+      ? (existingDate || properties[DOCUMENTS_ACCEPTED_DATE_PROP] || null)
+      : null
+  };
+}
 
 exports.main = async (context = {}) => {
   try {
@@ -44,33 +103,43 @@ exports.main = async (context = {}) => {
       console.warn('Could not parse document_data on load:', parseError.message);
     }
 
-    const existingDate = props[DOCUMENTS_ACCEPTED_DATE_PROP] || null;
-    const editDate = props.hs_lastmodifieddate
-      ? toHubSpotDateCentral(new Date(props.hs_lastmodifieddate))
-      : toHubSpotDateCentral();
+    let allAccepted = false;
+    let documentsAcceptedDate = props[DOCUMENTS_ACCEPTED_DATE_PROP] || null;
 
-    const sync = buildDocumentsAcceptedDateProperties(documentData, existingDate, editDate);
+    // Date sync must never block checklist load
+    try {
+      const existingDate = props[DOCUMENTS_ACCEPTED_DATE_PROP] || null;
+      const editDate = props.hs_lastmodifieddate
+        ? toHubSpotDateCentral(new Date(props.hs_lastmodifieddate))
+        : toHubSpotDateCentral();
 
-    if (Object.keys(sync.properties).length > 0) {
-      console.log('Syncing documents_accepted_date on card load', {
-        objectId,
-        allAccepted: sync.allAccepted,
-        properties: sync.properties
-      });
-      await hubspotClient.crm.objects.basicApi.update(
-        'p_client_projects',
-        objectId,
-        { properties: sync.properties }
-      );
-      props[DOCUMENTS_ACCEPTED_DATE_PROP] = sync.documentsAcceptedDate || '';
+      const sync = buildDocumentsAcceptedDateProperties(documentData, existingDate, editDate);
+      allAccepted = sync.allAccepted;
+      documentsAcceptedDate = sync.documentsAcceptedDate;
+
+      if (Object.keys(sync.properties).length > 0) {
+        console.log('Syncing documents_accepted_date on card load', {
+          objectId,
+          allAccepted: sync.allAccepted,
+          properties: sync.properties
+        });
+        await hubspotClient.crm.objects.basicApi.update(
+          'p_client_projects',
+          objectId,
+          { properties: sync.properties }
+        );
+        props[DOCUMENTS_ACCEPTED_DATE_PROP] = sync.documentsAcceptedDate || '';
+      }
+    } catch (syncError) {
+      console.warn('Documents Accepted Date sync failed on load; returning document_data anyway', syncError);
     }
 
     return {
       status: 'SUCCESS',
       data: {
         properties: props,
-        allAccepted: sync.allAccepted,
-        documentsAcceptedDate: sync.documentsAcceptedDate
+        allAccepted,
+        documentsAcceptedDate
       }
     };
   } catch (error) {
