@@ -114,6 +114,14 @@ export function BannerSettings() {
         <div className="flex items-center gap-2 text-sm font-medium text-gray-500 mb-2">
           <Eye className="h-4 w-4" />
           Preview
+          <span
+            className={clsx(
+              'ml-1 px-2 py-0.5 rounded-full text-xs font-medium',
+              banner.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+            )}
+          >
+            {banner.enabled ? 'Live to clients' : 'Hidden from clients'}
+          </span>
         </div>
         {banner.message.trim() ? (
           <div className="rounded-lg overflow-hidden border border-gray-200">
@@ -136,22 +144,6 @@ export function BannerSettings() {
       </div>
 
       <div className="card p-6 space-y-5">
-        {/* On/off */}
-        <label className="flex items-start gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={banner.enabled}
-            onChange={(e) => update({ enabled: e.target.checked })}
-            className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-          />
-          <span>
-            <span className="font-medium text-gray-900">Show banner to clients</span>
-            <span className="block text-sm text-gray-500">
-              {banner.enabled ? 'Currently visible in the portal' : 'Hidden — clients see nothing'}
-            </span>
-          </span>
-        </label>
-
         {/* Message */}
         <div>
           <label htmlFor="banner-message" className="label">Message</label>
@@ -262,16 +254,66 @@ export function BannerSettings() {
         </div>
       )}
 
-      <div className="flex items-center gap-3">
-        <button onClick={handleSave} disabled={isSaving} className="btn-primary">
+      {/* Visibility sits with the action, not buried in the settings list.
+          Saving content while the banner is switched off is the one mistake
+          this screen invites, so the switch has to be impossible to miss at the
+          moment you publish. */}
+      <div className="card p-4 flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={banner.enabled}
+          onClick={() => update({ enabled: !banner.enabled })}
+          className={clsx(
+            'flex items-center gap-3 p-2 -m-2 rounded-lg text-left transition-colors',
+            'hover:bg-gray-50'
+          )}
+        >
+          <span
+            className={clsx(
+              'relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors',
+              banner.enabled ? 'bg-green-600' : 'bg-gray-300'
+            )}
+          >
+            <span
+              className={clsx(
+                'inline-block h-5 w-5 mt-0.5 rounded-full bg-white shadow transform transition-transform',
+                banner.enabled ? 'translate-x-5' : 'translate-x-0.5'
+              )}
+            />
+          </span>
+          <span>
+            <span className="block font-medium text-gray-900">Show banner to clients</span>
+            <span className={clsx('block text-sm', banner.enabled ? 'text-green-700' : 'text-gray-500')}>
+              {banner.enabled
+                ? 'Visible on the portal'
+                : 'Off — clients see nothing, even after publishing'}
+            </span>
+          </span>
+        </button>
+
+        <button onClick={handleSave} disabled={isSaving} className="btn-primary sm:w-auto w-full">
           <Save className="h-4 w-4 mr-2" />
           {isSaving ? 'Publishing…' : 'Publish changes'}
         </button>
+      </div>
+
+      <div className="flex items-center gap-3">
+        {/* The confirmation must reflect what clients actually get. Saving with
+            the toggle off stores the content but shows nothing, and claiming
+            otherwise sends staff away believing a notice is live when it is not. */}
         {saved && (
-          <span className="text-green-700 text-sm flex items-center gap-1">
-            <CheckCircle className="h-4 w-4" />
-            Published — clients see this now
-          </span>
+          banner.enabled ? (
+            <span className="text-green-700 text-sm flex items-center gap-1">
+              <CheckCircle className="h-4 w-4" />
+              Published — clients see this now
+            </span>
+          ) : (
+            <span className="text-amber-700 text-sm flex items-center gap-1">
+              <AlertCircle className="h-4 w-4" />
+              Saved, but hidden — tick “Show banner to clients” to publish it
+            </span>
+          )
         )}
       </div>
     </div>

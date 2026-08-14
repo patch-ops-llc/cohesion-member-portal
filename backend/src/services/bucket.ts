@@ -12,8 +12,9 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { logger } from '../utils/logger';
 
 /**
- * Railway Storage Bucket — S3-compatible object storage, used as the staging
- * area between "the client's upload succeeded" and "HubSpot has the file".
+ * Railway Storage Bucket — S3-compatible object storage. Holds the retained
+ * copy of every uploaded document, and doubles as the staging area between
+ * "the client's upload succeeded" and "HubSpot has the file".
  *
  * The backend mediates every transfer rather than handing the browser a
  * presigned URL: it means the bytes are validated before they are stored, there
@@ -57,11 +58,11 @@ function getClient(): S3Client {
   return client;
 }
 
-// Object key for a staged upload. Grouped by project so a bucket listing is
+// Object key for a stored upload. Grouped by project so a bucket listing is
 // navigable, with a uuid so two files of the same name never collide.
 export function buildObjectKey(projectId: string, originalFilename: string): string {
   const ext = path.extname(originalFilename).slice(0, 12);
-  return `staging/${projectId}/${randomUUID()}${ext}`;
+  return `projects/${projectId}/${randomUUID()}${ext}`;
 }
 
 /**

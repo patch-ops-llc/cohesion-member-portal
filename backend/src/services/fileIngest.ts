@@ -119,13 +119,16 @@ export async function pushToHubSpot(uploadId: string): Promise<boolean> {
         hubspotFileId,
         hubspotNoteId,
         transferStatus: 'synced',
-        transferError: null,
-        storagePath: null
+        transferError: null
       }
     });
 
-    // HubSpot now holds the durable copy, so the staged object can be freed.
-    await bucket.deleteObject(record.storagePath);
+    // The bucket copy is deliberately kept. HubSpot would otherwise be the only
+    // place a client's tax document exists, and a deletion there — accidental
+    // or otherwise — would be unrecoverable. Storage is ~$0.015/GB-month, which
+    // is a negligible price for not depending on a third party for the only
+    // copy. It also means downloads serve from the bucket rather than costing a
+    // HubSpot API call.
 
     logger.info('Staged file synced to HubSpot', { uploadId, hubspotFileId });
     return true;

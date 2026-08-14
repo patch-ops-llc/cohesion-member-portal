@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import * as hubspot from '../services/hubspot';
 import * as storage from '../services/storage';
+import * as bucket from '../services/bucket';
 import * as emailService from '../services/email';
 import { pushToHubSpot } from '../services/fileIngest';
 import { syncDocumentStatusFromFiles } from '../utils/fileStatus';
@@ -1428,8 +1429,8 @@ router.delete('/files/:id', async (req, res, next) => {
     await prisma.fileUpload.delete({ where: { id: record.id } });
 
     if (record.hubspotFileId) await hubspot.deleteFileFromHubSpot(record.hubspotFileId);
-    // Clear the staged copy too if it never made it to HubSpot.
-    if (record.storagePath) await storage.removeTempFile(record.storagePath);
+    // Object key, not a local path — this must go to the bucket.
+    if (record.storagePath) await bucket.deleteObject(record.storagePath);
 
     const documentStatus = await syncDocumentStatusFromFiles(
       record.projectId, record.categoryKey, record.documentIndex

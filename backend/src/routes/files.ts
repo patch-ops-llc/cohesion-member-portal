@@ -303,9 +303,8 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res, next) => {
     await prisma.fileUpload.delete({ where: { id } });
 
     if (record.hubspotFileId) await hubspot.deleteFileFromHubSpot(record.hubspotFileId);
-    // Remove the staged copy too — without this, deleting a file that never
-    // reached HubSpot would leave it on the volume forever.
-    if (record.storagePath) await storage.removeTempFile(record.storagePath);
+    // Object key, not a local path — this must go to the bucket.
+    if (record.storagePath) await bucket.deleteObject(record.storagePath);
 
     const status = await syncDocumentStatusFromFiles(
       record.projectId, record.categoryKey, record.documentIndex
