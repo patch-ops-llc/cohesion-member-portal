@@ -5,6 +5,7 @@ const ADMIN_EMAILS_KEY = 'adminNotificationEmails';
 const WEEKLY_CLIENT_DIGEST_KEY = 'weeklyClientDigestEnabled';
 const WEEKLY_CLIENT_DIGEST_SCHEDULE_KEY = 'weeklyClientDigestSchedule';
 const UPLOAD_DIGEST_SCHEDULE_KEY = 'adminUploadDigestSchedule';
+const PORTAL_BANNER_KEY = 'portalBanner';
 
 // Timezones we allow admins to choose from (must be valid IANA names for node-cron).
 export const ALLOWED_TIMEZONES = [
@@ -58,6 +59,100 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
   const n = Number(value);
   if (!Number.isInteger(n) || n < min || n > max) return fallback;
   return n;
+}
+
+// ─── Portal banner ─────────────────────────────────────────────────────
+// Admin-managed announcement shown across the client-facing portal. Stored as
+// one JSON blob in app_settings so content changes need no deployment.
+
+export type BannerStyle = 'info' | 'warning' | 'success';
+
+export interface PortalBanner {
+  enabled: boolean;
+  message: string;
+  style: BannerStyle;
+  cta: { label: string; url: string } | null;
+  // 'all', or an explicit list of client-facing route patterns
+  pages: 'all' | string[];
+  updatedAt: string | null;
+}
+
+export const BANNER_PAGE_OPTIONS = [
+  { value: '/', label: 'Project list' },
+  { value: '/project', label: 'Project detail' },
+  { value: '/settings/notifications', label: 'Notification settings' },
+  { value: '/login', label: 'Login' }
+];
+
+const DEFAULT_BANNER: PortalBanner = {
+  enabled: false,
+  message: '',
+  style: 'info',
+  cta: null,
+  pages: 'all',
+  updatedAt: null
+};
+
+const BANNER_STYLES: BannerStyle[] = ['info', 'warning', 'success'];
+
+// The CTA is admin-authored and rendered into an href, so restrict it to
+// http(s) and relative paths — never javascript:/data: URLs.
+function sanitizeCtaUrl(url: unknown): string | null {
+  if (typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('/')) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeBanner(input: unknown): PortalBanner {
+  const raw = (input ?? {}) as Partial<PortalBanner> & { cta?: { label?: string; url?: string } | null };
+
+  const ctaUrl = sanitizeCtaUrl(raw.cta?.url);
+  const ctaLabel = typeof raw.cta?.label === 'string' ? raw.cta.label.trim().slice(0, 60) : '';
+
+  return {
+    enabled: Boolean(raw.enabled),
+    message: typeof raw.message === 'string' ? raw.message.trim().slice(0, 500) : '',
+    style: BANNER_STYLES.includes(raw.style as BannerStyle) ? (raw.style as BannerStyle) : 'info',
+    cta: ctaUrl && ctaLabel ? { label: ctaLabel, url: ctaUrl } : null,
+    pages: Array.isArray(raw.pages)
+      ? raw.pages.filter((p): p is string => typeof p === 'string').slice(0, 20)
+      : 'all',
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : null
+  };
+}
+
+export async function getPortalBanner(): Promise<PortalBanner> {
+  try {
+    const setting = await prisma.appSetting.findUnique({ where: { key: PORTAL_BANNER_KEY } });
+    if (setting) return sanitizeBanner(JSON.parse(setting.value));
+  } catch (err) {
+    logger.warn('Failed to read portal banner, using default', { error: String(err) });
+  }
+  return { ...DEFAULT_BANNER };
+}
+
+export async function setPortalBanner(input: Partial<PortalBanner>): Promise<PortalBanner> {
+  const current = await getPortalBanner();
+  const next = sanitizeBanner({
+    ...current,
+    ...input,
+    updatedAt: new Date().toISOString()
+  });
+
+  await prisma.appSetting.upsert({
+    where: { key: PORTAL_BANNER_KEY },
+    create: { key: PORTAL_BANNER_KEY, value: JSON.stringify(next) },
+    update: { value: JSON.stringify(next) }
+  });
+
+  return next;
 }
 
 export async function getAdminEmails(): Promise<string[]> {

@@ -13,6 +13,8 @@ import { ProtectedRoute } from './components/auth/ProtectedRoute';
 // Shared components
 import { Layout } from './components/shared/Layout';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
+import { Banner } from './components/shared/Banner';
+import { useBanner } from './hooks/useBanner';
 
 // Portal components
 import { ProjectList } from './components/portal/ProjectList';
@@ -29,6 +31,7 @@ import { AuditLog } from './components/admin/AuditLog';
 import { RegisteredUsers } from './components/admin/RegisteredUsers';
 import { AdminNotificationSettings } from './components/admin/NotificationSettings';
 import { EmailTemplateSettings } from './components/admin/EmailTemplateSettings';
+import { BannerSettings } from './components/admin/BannerSettings';
 
 // Auth provider
 import { AuthProvider } from './hooks/useAuth';
@@ -155,6 +158,14 @@ function App() {
                   </AdminRoute>
                 }
               />
+              <Route
+                path="/admin/banner"
+                element={
+                  <AdminRoute>
+                    <BannerSettings />
+                  </AdminRoute>
+                }
+              />
 
               {/* Fallback */}
               <Route path="*" element={<Navigate to="/" replace />} />
@@ -170,10 +181,16 @@ function App() {
 function LoginPage() {
   const [step, setStep] = React.useState<'email' | 'register' | 'login' | 'forgot'>('email');
   const [email, setEmail] = React.useState('');
+  // The login screen sits outside Layout, so it needs the banner wired up
+  // directly — a "portal unavailable" notice is least useful to people who
+  // have already got in.
+  const banner = useBanner();
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
+    <div className="min-h-screen flex flex-col bg-gray-50">
+      {banner && <Banner banner={banner} />}
+      <div className="flex-1 flex items-center justify-center px-4 py-8">
+        <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
         {step === 'email' && (
           <EmailLookupForm
             onValidated={(e, needsRegistration) => {
@@ -195,12 +212,13 @@ function LoginPage() {
             onForgotPassword={() => setStep('forgot')}
           />
         )}
-        {step === 'forgot' && (
-          <ForgotPasswordForm
-            email={email}
-            onBack={() => setStep('login')}
-          />
-        )}
+          {step === 'forgot' && (
+            <ForgotPasswordForm
+              email={email}
+              onBack={() => setStep('login')}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

@@ -2,6 +2,8 @@ import { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LogOut, Bell } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { useBanner } from '../../hooks/useBanner';
+import { Banner } from './Banner';
 
 const COHESION_LOGO_URL = 'https://cohesionco.com/wp-content/uploads/2025/10/Cohesion-logo-with-trademark-1.png';
 
@@ -12,6 +14,7 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const { isAuthenticated, displayName, email, logout } = useAuth();
   const navigate = useNavigate();
+  const banner = useBanner();
 
   const handleLogout = () => {
     logout();
@@ -59,6 +62,9 @@ export function Layout({ children }: LayoutProps) {
           </div>
         </div>
       </header>
+
+      {/* Portal-wide announcement, admin-managed */}
+      {banner && <Banner banner={banner} />}
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">

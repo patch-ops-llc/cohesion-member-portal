@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { FileText, Upload, Trash2, Edit2, Check, X } from 'lucide-react';
 import clsx from 'clsx';
-import type { DocumentEntry, DocumentStatus } from '../../types';
+import type { DocumentEntry, DocumentStatus, SubmittedFile, FileReviewStatus } from '../../types';
 import { StatusBadge } from '../shared/StatusBadge';
 import { DocumentStatusEditor } from '../admin/DocumentStatusEditor';
 import { FileUpload } from './FileUpload';
+import { SubmittedFileList } from './SubmittedFileList';
 
 interface DocumentItemProps {
   projectId: string;
@@ -16,6 +17,12 @@ interface DocumentItemProps {
   onUpdateStatus?: (status: DocumentStatus) => void;
   /** Called when file upload succeeds - updates status to pending_review in real time */
   onUploadSuccess?: () => void;
+  /** Files already submitted against this document item */
+  files?: SubmittedFile[];
+  /** Client: remove one of their own files before review */
+  onDeleteFile?: (fileId: string) => Promise<void> | void;
+  /** Staff: accept / reject an individual file */
+  onReviewFile?: (fileId: string, status: FileReviewStatus) => Promise<void> | void;
   /** When true, client view: only show upload, hide edit/remove */
   clientMode?: boolean;
   isSaving?: boolean;
@@ -30,6 +37,9 @@ export function DocumentItem({
   onRemove,
   onUpdateStatus,
   onUploadSuccess,
+  files = [],
+  onDeleteFile,
+  onReviewFile,
   clientMode = false,
   isSaving = false
 }: DocumentItemProps) {
@@ -44,9 +54,10 @@ export function DocumentItem({
     setIsEditing(false);
   };
 
-  const needsUpload = document.status === 'not_submitted' || 
-                      document.status === 'needs_resubmission' ||
-                      document.status === 'missing_files';
+  // With many files per item, "already submitted" no longer means "done" — a
+  // client may need to add a second document to an item that is awaiting
+  // review. Only an accepted item is closed to further uploads.
+  const needsUpload = document.status !== 'accepted';
 
   return (
     <div className="relative">
@@ -119,21 +130,6 @@ export function DocumentItem({
                   <Edit2 className="h-4 w-4" />
                 </button>
                 
-                {needsUpload && (
-                  <button
-                    onClick={() => setShowUpload(!showUpload)}
-                    className={clsx(
-                      'p-1.5 rounded',
-                      showUpload 
-                        ? 'text-primary bg-primary-50' 
-                        : 'text-gray-400 hover:text-primary'
-                    )}
-                    title="Upload file"
-                  >
-                    <Upload className="h-4 w-4" />
-                  </button>
-                )}
-                
                 <button
                   onClick={onRemove}
                   className="p-1.5 text-gray-400 hover:text-red-600 rounded"
@@ -148,19 +144,31 @@ export function DocumentItem({
                 onClick={() => setShowUpload(!showUpload)}
                 className={clsx(
                   'p-1.5 rounded inline-flex items-center gap-1.5',
-                  showUpload 
-                    ? 'text-primary bg-primary-50 font-medium' 
+                  showUpload
+                    ? 'text-primary bg-primary-50 font-medium'
                     : 'text-primary hover:bg-primary-50'
                 )}
-                title="Upload file"
+                title={files.length > 0 ? 'Add another file' : 'Upload file'}
               >
                 <Upload className="h-4 w-4" />
-                <span className="text-sm">Upload</span>
+                <span className="text-sm">{files.length > 0 ? 'Add file' : 'Upload'}</span>
               </button>
             )}
           </div>
         </div>
       </div>
+
+      {/* Files already submitted for this item */}
+      {files.length > 0 && (
+        <div className="mt-2 ml-8">
+          <SubmittedFileList
+            files={files}
+            onDelete={onDeleteFile}
+            onReview={onReviewFile}
+            adminMode={!clientMode}
+          />
+        </div>
+      )}
 
       {/* Upload panel - full width below the row for visibility */}
       {showUpload && (

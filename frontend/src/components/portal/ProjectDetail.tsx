@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Save, AlertCircle } from 'lucide-react';
 import { useProject, useUpdateDocumentData } from '../../hooks/useProjects';
+import { useProjectFiles, useDeleteFile } from '../../hooks/useProjectFiles';
 import { useAuth } from '../../hooks/useAuth';
 import { useDocumentData } from '../../hooks/useDocumentData';
 import { InlineLoader } from '../shared/LoadingSpinner';
@@ -56,9 +57,9 @@ export function ProjectDetail() {
       <PizzaTracker currentStage={data.project.stage} />
 
       {/* Document Checklist */}
-      <DocumentChecklistWrapper 
+      <DocumentChecklistWrapper
         projectId={projectId!}
-        initialData={data.documentData} 
+        initialData={data.documentData}
         onSave={handleSave}
         isSaving={updateMutation.isPending}
       />
@@ -89,6 +90,9 @@ function DocumentChecklistWrapper({ projectId, initialData, onSave, isSaving }: 
     onSave
   });
 
+  const { data: files = [], refetch: refetchFiles } = useProjectFiles(projectId);
+  const deleteFileMutation = useDeleteFile(projectId);
+
   return (
     <div className="space-y-4">
       {/* Save indicator */}
@@ -118,9 +122,12 @@ function DocumentChecklistWrapper({ projectId, initialData, onSave, isSaving }: 
         onUpdateDocumentName={updateDocumentName}
         onUpdateDocumentStatus={updateDocumentStatus}
         onRemoveDocument={removeDocument}
-        onUploadSuccess={(categoryKey, docIndex) =>
-          setDocumentStatusOptimistic(categoryKey, docIndex, 'pending_review')
-        }
+        onUploadSuccess={(categoryKey, docIndex) => {
+          setDocumentStatusOptimistic(categoryKey, docIndex, 'pending_review');
+          refetchFiles();
+        }}
+        files={files}
+        onDeleteFile={(fileId) => deleteFileMutation.mutateAsync(fileId)}
         clientMode={true}
       />
     </div>

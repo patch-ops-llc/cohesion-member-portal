@@ -44,25 +44,63 @@ export async function updateDocumentData(
   return response.data.mergedData;
 }
 
-// Upload file
-export async function uploadFile(
+export interface UploadBatchResponse {
+  success: boolean;
+  uploaded: { uploadId: string; filename: string }[];
+  failed: { filename: string; error: string }[];
+}
+
+/**
+ * Upload one or more files against a single document item.
+ *
+ * Reports real byte progress via onUploadProgress — the previous implementation
+ * animated a fake percentage on a timer, which is tolerable for a 5 MB cap and
+ * actively misleading at 50 MB.
+ */
+export async function uploadFiles(
   projectId: string,
-  file: File,
+  files: File[],
   categoryKey: string,
-  documentIndex?: number
-): Promise<{ fileId: string; noteId: string; uploadId: string }> {
+  documentIndex?: number,
+  onProgress?: (percent: number) => void,
+  signal?: AbortSignal,
+  onSendComplete?: () => void
+): Promise<UploadBatchResponse> {
   const formData = new FormData();
-  formData.append('file', file);
+  files.forEach(file => formData.append('files', file));
   formData.append('categoryKey', categoryKey);
   if (documentIndex !== undefined) {
     formData.append('documentIndex', documentIndex.toString());
   }
 
-  const response = await api.post(`/files/${projectId}/upload`, formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
+  const response = await api.post<UploadBatchResponse>(`/files/${projectId}/upload`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    // Large files on slow connections legitimately exceed the 30s default.
+    timeout: 0,
+    signal,
+    onUploadProgress: (event) => {
+      const total = event.total ?? files.reduce((sum, f) => sum + f.size, 0);
+      if (total <= 0) return;
+
+      onProgress?.(Math.min(100, Math.round((event.loaded / total) * 100)));
+
+      // Bytes are all sent, but the request is not finished: the server still
+      // has to push each file to HubSpot File Manager, create the notes, and
+      // update document_data. That wait is invisible to onUploadProgress, so
+      // signal the phase change rather than leaving a bar parked at 99%.
+      if (event.loaded >= total) onSendComplete?.();
     }
   });
 
   return response.data;
+}
+
+// Single-file convenience wrapper, kept for existing callers.
+export async function uploadFile(
+  projectId: string,
+  file: File,
+  categoryKey: string,
+  documentIndex?: number
+): Promise<UploadBatchResponse> {
+  return uploadFiles(projectId, [file], categoryKey, documentIndex);
 }

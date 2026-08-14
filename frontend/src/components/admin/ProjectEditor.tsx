@@ -8,7 +8,7 @@ import { ErrorMessage } from '../shared/ErrorBoundary';
 import { DocumentChecklist } from '../portal/DocumentChecklist';
 import { useDocumentData } from '../../hooks/useDocumentData';
 import { normalizeFolderUrl } from '../../utils/hubspot';
-import type { DocumentData, FileUpload } from '../../types';
+import type { DocumentData, FileUpload, SubmittedFile, FileReviewStatus } from '../../types';
 
 interface AdminProjectDetail {
   project: {
@@ -363,6 +363,7 @@ function AdminDocumentChecklistSection({
   onSave,
   isSaving
 }: AdminDocumentChecklistSectionProps) {
+  const queryClient = useQueryClient();
   const {
     documentData,
     error,
@@ -378,6 +379,32 @@ function AdminDocumentChecklistSection({
       await onSave(data);
     }
   });
+
+  // Staff-side file list. Uses the admin-key routes rather than the client
+  // upload/file routes, which require a client JWT the admin UI never has.
+  const { data: filesData, refetch: refetchFiles } = useQuery({
+    queryKey: ['admin', 'project-files', projectId],
+    queryFn: async () => {
+      const response = await api.get<{ success: boolean; files: SubmittedFile[] }>(
+        `/admin/projects/${projectId}/files`
+      );
+      return response.data.files;
+    },
+    enabled: !!projectId
+  });
+
+  const reviewFile = async (fileId: string, status: FileReviewStatus) => {
+    await api.patch(`/admin/files/${fileId}`, { status });
+    await refetchFiles();
+    // The item's status is derived from its files, so pull the project again.
+    queryClient.invalidateQueries({ queryKey: ['admin', 'project', projectId] });
+  };
+
+  const deleteFile = async (fileId: string) => {
+    await api.delete(`/admin/files/${fileId}`);
+    await refetchFiles();
+    queryClient.invalidateQueries({ queryKey: ['admin', 'project', projectId] });
+  };
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -399,7 +426,8 @@ function AdminDocumentChecklistSection({
         </div>
       </div>
       <p className="text-sm text-gray-600 mb-4">
-        Add documents, set statuses, and manage categories. Client uploads files in the portal; you approve or request resubmission.
+        Add documents, set statuses, and manage categories. Every file a client submits is listed
+        under its document — accept or request resubmission on each one individually.
       </p>
       <DocumentChecklist
         projectId={projectId}
@@ -409,6 +437,9 @@ function AdminDocumentChecklistSection({
         onUpdateDocumentName={updateDocumentName}
         onUpdateDocumentStatus={updateDocumentStatus}
         onRemoveDocument={removeDocument}
+        files={filesData ?? []}
+        onReviewFile={reviewFile}
+        onDeleteFile={deleteFile}
         clientMode={false}
         isSaving={isSaving || isAutoSaving}
       />

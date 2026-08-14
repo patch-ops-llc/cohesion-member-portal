@@ -7,6 +7,8 @@ import path from 'path';
 import authRoutes from './routes/auth';
 import projectRoutes from './routes/projects';
 import fileRoutes from './routes/files';
+import configRoutes from './routes/config';
+import settingsRoutes from './routes/settings';
 import adminRoutes from './routes/admin';
 import cardRoutes from './routes/cards';
 import notificationRoutes from './routes/notifications';
@@ -62,6 +64,18 @@ const limiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' }
 });
+
+// Uploads get their own, larger bucket. A client submitting a dozen files
+// against one document would otherwise burn a large slice of the shared 100
+// requests per 15 minutes and be locked out mid-submission.
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many uploads in a short period, please wait a moment and try again' }
+});
+app.use('/api/files', uploadLimiter);
 app.use('/api', limiter);
 
 // Health check
@@ -70,6 +84,8 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
+app.use('/api/config', configRoutes);
+app.use('/api/settings', settingsRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/files', fileRoutes);

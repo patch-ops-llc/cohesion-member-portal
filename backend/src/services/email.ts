@@ -257,6 +257,20 @@ export async function sendAdminPasswordResetEmail(email: string, resetToken: str
   await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail, cc);
 }
 
+// Renders the files in a submission for email templates.
+//
+// `filename` is kept as a variable so existing saved templates keep working —
+// it now holds a comma-joined list rather than a single name. `fileList` is the
+// preferred variable and renders one file per line.
+function renderFileVars(filenames: string[]): { filename: string; fileList: string; fileCount: string } {
+  const list = filenames.length > 0 ? filenames : ['(no files)'];
+  return {
+    filename: list.join(', '),
+    fileList: list.map(f => `• ${f}`).join('<br>'),
+    fileCount: String(list.length)
+  };
+}
+
 // ─── DOCUMENT SUBMISSION (user) ────────────────────────────────────────
 export async function sendDocumentSubmissionEmail(
   email: string,
@@ -264,7 +278,7 @@ export async function sendDocumentSubmissionEmail(
   projectName: string,
   categoryLabel: string,
   documentName: string,
-  filename: string,
+  filenames: string[],
   cc?: string[]
 ): Promise<void> {
   const allowed = await shouldSendToUser(email, 'document_submission');
@@ -276,7 +290,7 @@ export async function sendDocumentSubmissionEmail(
     projectName,
     categoryLabel,
     documentName,
-    filename,
+    ...renderFileVars(filenames),
     portalUrl: frontendUrl
   };
   const subject = interpolate(tpl.subject, vars);
@@ -293,7 +307,7 @@ export async function sendAdminDocumentSubmissionNotification(
   projectId: string,
   categoryLabel: string,
   documentName: string,
-  filename: string
+  filenames: string[]
 ): Promise<void> {
   const recipients = await getAdminRecipientsFor('admin_document_submission');
   if (recipients.length === 0) return;
@@ -305,7 +319,7 @@ export async function sendAdminDocumentSubmissionNotification(
     projectName,
     categoryLabel,
     documentName,
-    filename,
+    ...renderFileVars(filenames),
     time: new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }),
     adminUrl: `${frontendUrl}/admin/projects/${projectId}`
   };

@@ -3,8 +3,11 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger';
 
-// Local file storage (can be extended to S3 later)
+// Legacy local storage root. Staging now lives in the Railway bucket
+// (services/bucket.ts); this remains only for the one-off scripts.
 const STORAGE_PATH = process.env.FILE_STORAGE_PATH || './uploads';
+
+
 
 // Ensure storage directory exists
 function ensureStorageDir(): void {
@@ -73,4 +76,10 @@ export async function getFileStats(storedPath: string): Promise<fs.Stats | null>
 // Check if file exists
 export function fileExists(storedPath: string): boolean {
   return fs.existsSync(storedPath);
+}
+
+// Best-effort temp file cleanup; never throws into a request handler.
+export async function removeTempFile(filePath?: string): Promise<void> {
+  if (!filePath) return;
+  await fs.promises.unlink(filePath).catch(() => {});
 }

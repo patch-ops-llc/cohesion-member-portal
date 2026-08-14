@@ -17,7 +17,12 @@ model User {
   passwordHash     String    @map("password_hash")
   hubspotContactId String?   @map("hubspot_contact_id")
   createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  // @default(now()) documents the DEFAULT CURRENT_TIMESTAMP that the
+  // add_user_auth migration already put on this column. Without it the schema
+  // and database disagree, and every future generated migration tries to drop
+  // that default. @updatedAt still stamps the value on write, so behaviour is
+  // unchanged either way.
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
   lastLoginAt      DateTime? @map("last_login_at")
 
   passwordResetTokens PasswordResetToken[]
@@ -42,7 +47,15 @@ model PasswordResetToken {
   @@map("password_reset_tokens")
 }
 
-// File upload metadata (HubSpot is source of truth, this is for quick lookups)
+// File upload metadata.
+//
+// This table is the per-file index for a document item: many files may share a
+// (projectId, categoryKey, documentIndex). The document-level status stored in
+// HubSpot's document_data is a roll-up derived from these rows — see
+// utils/fileStatus.ts. Deliberately NOT stored inside document_data, because
+// mergeDocumentData() and documentEntrySchema both discard unknown keys on a
+// document entry, so any per-file data added there is silently destroyed on the
+// next save from either the portal or the HubSpot CRM card.
 model FileUpload {
   id              String   @id @default(uuid())
   projectId       String   @map("project_id")
@@ -50,16 +63,28 @@ model FileUpload {
   documentIndex   Int?     @map("document_index")
   originalFilename String  @map("original_filename")
   storedFilename  String   @map("stored_filename")
+  // Path on the persistent volume while the file is staged. Cleared once the
+  // file is safely in HubSpot and the staged copy is deleted.
   storagePath     String?  @map("storage_path")
   hubspotFileId   String?  @map("hubspot_file_id")
   hubspotNoteId   String?  @map("hubspot_note_id")
   fileSize        Int?     @map("file_size")
   mimeType        String?  @map("mime_type")
   uploadedByEmail String?  @map("uploaded_by_email")
+  // Review state: pending_review | accepted | needs_resubmission.
+  // Reuses the column that already existed rather than adding a parallel one.
   status          String   @default("pending_review")
+  // Staged -> HubSpot handoff: pending | transferring | synced | failed.
+  // The client is acknowledged at 'pending', so this is what tells us a file is
+  // safe on the volume but not yet in the CRM.
+  transferStatus  String   @default("pending") @map("transfer_status")
+  transferError   String?  @map("transfer_error")
+  transferAttempts Int     @default(0) @map("transfer_attempts")
   createdAt       DateTime @default(now()) @map("created_at")
 
   @@index([projectId])
+  @@index([projectId, categoryKey, documentIndex])
+  @@index([transferStatus])
   @@map("file_uploads")
 }
 

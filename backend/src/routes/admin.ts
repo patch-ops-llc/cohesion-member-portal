@@ -1,8 +1,15 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import crypto from 'crypto';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import * as hubspot from '../services/hubspot';
+import * as storage from '../services/storage';
 import * as emailService from '../services/email';
+import { pushToHubSpot } from '../services/fileIngest';
+import { syncDocumentStatusFromFiles } from '../utils/fileStatus';
+import { signDownloadToken } from '../utils/downloadToken';
 import {
   runUploadDigest,
   runWeeklyClientDigest,
@@ -17,11 +24,20 @@ import {
   setWeeklyClientDigestSchedule,
   getUploadDigestSchedule,
   setUploadDigestSchedule,
+  getPortalBanner,
+  setPortalBanner,
+  BANNER_PAGE_OPTIONS,
   ALLOWED_TIMEZONES
 } from '../services/settings';
 import { adminMiddleware } from '../middleware/admin';
 import { AppError } from '../middleware/errorHandler';
-import { documentStatusSchema } from '../utils/validation';
+import {
+  documentStatusSchema,
+  validateFile,
+  allowedMimeTypes,
+  maxFileSize,
+  maxFilesPerUpload
+} from '../utils/validation';
 import { logger } from '../utils/logger';
 import prisma from '../db/client';
 
@@ -98,10 +114,10 @@ router.get('/projects/:id', async (req, res, next) => {
     const project = await hubspot.getProject(id);
     const documentData = hubspot.parseDocumentData(project.properties.document_data);
 
-    // Get file uploads
+    // Get file uploads (live only — soft-deleted rows stay for the audit trail)
     const fileUploads = await prisma.fileUpload.findMany({
       where: { projectId: id },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'asc' }
     });
 
     // Get audit log
@@ -250,11 +266,42 @@ router.get('/audit-log', async (req, res, next) => {
   }
 });
 
+// GET /api/admin/verify - Cheap key check for the admin login screen.
+// The login form used to validate the key against /stats, which reads HubSpot —
+// so any HubSpot outage locked staff out with a misleading "Invalid API key".
+// This endpoint touches nothing but the middleware.
+router.get('/verify', (req, res) => {
+  res.json({ success: true });
+});
+
 // GET /api/admin/stats - Dashboard statistics
 router.get('/stats', async (req, res, next) => {
   try {
-    const result = await hubspot.getAllProjects();
-    
+    // DB-backed figures first: these must still render when HubSpot is down.
+    const recentUploads = await prisma.fileUpload.count({
+      where: {
+        createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+      }
+    });
+
+    let result;
+    try {
+      result = await hubspot.getAllProjects();
+    } catch (error) {
+      // Degrade rather than 500 the whole dashboard when one upstream is down.
+      logger.error('Stats: HubSpot unavailable, returning partial stats', { error: String(error) });
+      return res.json({
+        success: true,
+        degraded: true,
+        stats: {
+          totalProjects: null,
+          activeProjects: null,
+          pendingReviewCount: null,
+          recentUploads
+        }
+      });
+    }
+
     let totalProjects = result.projects.length;
     let pendingReviewCount = 0;
     let activeProjects = 0;
@@ -278,15 +325,6 @@ router.get('/stats', async (req, res, next) => {
 
       if (hasActive) activeProjects++;
     }
-
-    // Get recent file uploads count
-    const recentUploads = await prisma.fileUpload.count({
-      where: {
-        createdAt: {
-          gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-        }
-      }
-    });
 
     res.json({
       success: true,
@@ -1205,6 +1243,229 @@ router.put('/upload-digest/schedule', async (req, res, next) => {
     } else {
       next(error);
     }
+  }
+});
+
+// ─── Portal banner ─────────────────────────────────────────────────────
+
+// GET /api/admin/settings/banner - full banner record for the editor
+router.get('/settings/banner', async (req, res, next) => {
+  try {
+    const banner = await getPortalBanner();
+    res.json({ success: true, banner, pageOptions: BANNER_PAGE_OPTIONS });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/admin/settings/banner - publish banner changes (takes effect immediately)
+router.put('/settings/banner', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      enabled: z.boolean().optional(),
+      message: z.string().max(500).optional(),
+      style: z.enum(['info', 'warning', 'success']).optional(),
+      cta: z
+        .object({ label: z.string().max(60), url: z.string().max(500) })
+        .nullable()
+        .optional(),
+      pages: z.union([z.literal('all'), z.array(z.string())]).optional()
+    });
+
+    const input = schema.parse(req.body);
+
+    // A banner that is turned on with nothing to say is almost certainly a
+    // mistake, and would render an empty bar to every client.
+    if (input.enabled && !(input.message ?? (await getPortalBanner()).message).trim()) {
+      throw new AppError('Add a message before turning the banner on', 400);
+    }
+
+    const banner = await setPortalBanner(input);
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'update_banner',
+        entityType: 'settings',
+        entityId: 'portalBanner',
+        userType: 'admin',
+        details: { enabled: banner.enabled, style: banner.style, pages: banner.pages },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin updated portal banner', { enabled: banner.enabled, style: banner.style });
+    res.json({ success: true, banner });
+  } catch (error) {
+    if (error instanceof z.ZodError) return next(new AppError('Invalid banner settings', 400));
+    next(error);
+  }
+});
+
+// ─── Files ─────────────────────────────────────────────────────────────
+// Staff previously had no working file operations at all: the client upload
+// route requires a client JWT, while the admin UI authenticates with an API
+// key, so every staff file action 401'd. These are the admin-key equivalents.
+
+function toAdminFileDto(f: {
+  id: string; categoryKey: string; documentIndex: number | null;
+  originalFilename: string; fileSize: number | null; mimeType: string | null;
+  uploadedByEmail: string | null; status: string;
+  transferStatus: string; transferError: string | null; createdAt: Date;
+  hubspotFileId: string | null; storagePath: string | null;
+}) {
+  return {
+    id: f.id,
+    categoryKey: f.categoryKey,
+    documentIndex: f.documentIndex,
+    filename: f.originalFilename,
+    size: f.fileSize,
+    mimeType: f.mimeType,
+    uploadedByEmail: f.uploadedByEmail,
+    status: f.status,
+    transferStatus: f.transferStatus,
+    transferError: f.transferError,
+    uploadedAt: f.createdAt,
+    canDownload: Boolean(f.hubspotFileId || f.storagePath)
+  };
+}
+
+// GET /api/admin/projects/:id/files - every live file on a project
+router.get('/projects/:id/files', async (req, res, next) => {
+  try {
+    const files = await prisma.fileUpload.findMany({
+      where: { projectId: req.params.id },
+      orderBy: { createdAt: 'asc' }
+    });
+    res.json({ success: true, files: files.map(toAdminFileDto) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/admin/files/:id/download - staff download link.
+// Mirrors the client route: returns our own streaming URL so the file arrives
+// as a download with its real name, whether it is staged or already in HubSpot.
+router.get('/files/:id/download', async (req, res, next) => {
+  try {
+    const record = await prisma.fileUpload.findUnique({ where: { id: req.params.id } });
+    if (!record) throw new AppError('File not found', 404);
+    if (!record.hubspotFileId && !record.storagePath) {
+      throw new AppError('No copy of this file is currently available.', 404);
+    }
+
+    res.json({
+      success: true,
+      url: `/api/files/${record.id}/raw?t=${encodeURIComponent(signDownloadToken(record.id))}`,
+      filename: record.originalFilename
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/admin/files/:id - accept or reject a single file
+router.patch('/files/:id', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      status: z.enum(['pending_review', 'accepted', 'needs_resubmission'])
+    });
+    const { status } = schema.parse(req.body);
+
+    const record = await prisma.fileUpload.findUnique({ where: { id: req.params.id } });
+    if (!record) throw new AppError('File not found', 404);
+
+    await prisma.fileUpload.update({
+      where: { id: req.params.id },
+      data: { status }
+    });
+
+    // Item status is a roll-up of its files, so re-derive it after the change.
+    const documentStatus = await syncDocumentStatusFromFiles(
+      record.projectId, record.categoryKey, record.documentIndex
+    );
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'file_review',
+        entityType: 'file',
+        entityId: record.id,
+        userType: 'admin',
+        details: {
+          projectId: record.projectId,
+          filename: record.originalFilename,
+          status
+        },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin reviewed file', { fileId: record.id, status });
+    res.json({ success: true, status, documentStatus });
+  } catch (error) {
+    if (error instanceof z.ZodError) return next(new AppError('Invalid review status', 400));
+    next(error);
+  }
+});
+
+// DELETE /api/admin/files/:id - staff removal (allowed at any review state)
+router.delete('/files/:id', async (req, res, next) => {
+  try {
+    const record = await prisma.fileUpload.findUnique({ where: { id: req.params.id } });
+    if (!record) throw new AppError('File not found', 404);
+
+    // Same claim as the client route: never delete a row out from under an
+    // in-flight push, or HubSpot ends up with an orphaned file and note.
+    const claimed = await prisma.fileUpload.updateMany({
+      where: { id: record.id, transferStatus: { in: ['pending', 'failed', 'synced'] } },
+      data: { transferStatus: 'deleting' }
+    });
+    if (claimed.count === 0) {
+      throw new AppError('This file is being filed right now. Please try again in a moment.', 409);
+    }
+
+    await prisma.fileUpload.delete({ where: { id: record.id } });
+
+    if (record.hubspotFileId) await hubspot.deleteFileFromHubSpot(record.hubspotFileId);
+    // Clear the staged copy too if it never made it to HubSpot.
+    if (record.storagePath) await storage.removeTempFile(record.storagePath);
+
+    const documentStatus = await syncDocumentStatusFromFiles(
+      record.projectId, record.categoryKey, record.documentIndex
+    );
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'file_delete',
+        entityType: 'file',
+        entityId: record.id,
+        userType: 'admin',
+        details: { projectId: record.projectId, filename: record.originalFilename },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    res.json({ success: true, documentStatus });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/admin/files/:id/retry-sync - re-run a failed HubSpot push by hand,
+// for when staff don't want to wait for the next sweep.
+router.post('/files/:id/retry-sync', async (req, res, next) => {
+  try {
+    await pushToHubSpot(req.params.id);
+    const record = await prisma.fileUpload.findUnique({ where: { id: req.params.id } });
+    res.json({
+      success: record?.transferStatus === 'synced',
+      transferStatus: record?.transferStatus ?? null,
+      transferError: record?.transferError ?? null
+    });
+  } catch (error) {
+    next(error);
   }
 });
 

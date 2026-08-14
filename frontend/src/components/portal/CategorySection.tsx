@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, FolderOpen } from 'lucide-react';
 import clsx from 'clsx';
-import type { DocumentEntry, CategoryStatus, DocumentStatus } from '../../types';
+import type {
+  DocumentEntry, CategoryStatus, DocumentStatus, SubmittedFile, FileReviewStatus
+} from '../../types';
 import { DocumentItem } from './DocumentItem';
 
 interface CategorySectionProps {
@@ -17,6 +19,10 @@ interface CategorySectionProps {
   onRemoveDocument: (docIndex: number) => void;
   /** Called when file upload succeeds - (docIndex) => void */
   onUploadSuccess?: (docIndex: number) => void;
+  /** Files for this category, keyed by document index */
+  filesByIndex?: Record<number, SubmittedFile[]>;
+  onDeleteFile?: (fileId: string) => Promise<void> | void;
+  onReviewFile?: (fileId: string, status: FileReviewStatus) => Promise<void> | void;
   /** When true, client view: hide Add Document, pass clientMode to DocumentItem */
   clientMode?: boolean;
   isSaving?: boolean;
@@ -34,6 +40,9 @@ export function CategorySection({
   onUpdateDocumentStatus,
   onRemoveDocument,
   onUploadSuccess,
+  filesByIndex = {},
+  onDeleteFile,
+  onReviewFile,
   clientMode = false,
   isSaving = false
 }: CategorySectionProps) {
@@ -145,6 +154,9 @@ export function CategorySection({
                 onRemove={() => onRemoveDocument(index)}
                 onUpdateStatus={!clientMode ? (status) => onUpdateDocumentStatus(index, status) : undefined}
                 onUploadSuccess={onUploadSuccess ? () => onUploadSuccess(index) : undefined}
+                files={filesByIndex[index] || []}
+                onDeleteFile={onDeleteFile}
+                onReviewFile={onReviewFile}
                 clientMode={clientMode}
                 isSaving={isSaving}
               />

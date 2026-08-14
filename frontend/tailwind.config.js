@@ -39,7 +39,16 @@ export default {
         warning: '#ffc107'
       },
       animation: {
-        'pulse-slow': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+        'pulse-slow': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        // Indeterminate bar for the phase of an upload the browser cannot
+        // measure: bytes are delivered, the server is still working.
+        indeterminate: 'indeterminate 1.4s ease-in-out infinite'
+      },
+      keyframes: {
+        indeterminate: {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(300%)' }
+        }
       }
     }
   },

@@ -55,6 +55,60 @@ export interface FileUpload {
   createdAt: string;
 }
 
+// Per-file review state (many files may hang off one document item)
+export type FileReviewStatus = 'pending_review' | 'accepted' | 'needs_resubmission';
+
+// Staged-on-volume -> HubSpot handoff state
+export type FileTransferStatus = 'pending' | 'transferring' | 'synced' | 'failed';
+
+// A file already submitted against a document item, as returned by the API
+export interface SubmittedFile {
+  id: string;
+  categoryKey: string;
+  documentIndex: number | null;
+  filename: string;
+  size: number | null;
+  mimeType: string | null;
+  uploadedByEmail: string | null;
+  status: FileReviewStatus;
+  uploadedAt: string;
+  canDownload: boolean;
+  // admin-only
+  transferStatus?: FileTransferStatus;
+  transferError?: string | null;
+}
+
+// Server-provided upload limits. Fetched once so the client can never disagree
+// with the server about what is allowed.
+export interface UploadConfig {
+  maxFileSize: number;
+  maxUploadMb: number;
+  maxFilesPerUpload: number;
+  allowedMimeTypes: string[];
+  allowedExtensions: string[];
+}
+
+// Portal banner
+export type BannerStyle = 'info' | 'warning' | 'success';
+
+export interface PortalBanner {
+  enabled: boolean;
+  message: string;
+  style: BannerStyle;
+  cta: { label: string; url: string } | null;
+  pages: 'all' | string[];
+  updatedAt: string | null;
+}
+
+// Public shape (no `enabled` — a disabled banner is simply absent)
+export interface PublicBanner {
+  message: string;
+  style: BannerStyle;
+  cta: { label: string; url: string } | null;
+  pages: 'all' | string[];
+  updatedAt: string | null;
+}
+
 // User
 export interface User {
   id: string;

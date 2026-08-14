@@ -105,19 +105,19 @@ export const DEFAULT_TEMPLATES: TemplateDefault[] = [
     senderEmail: FROM_EMAIL,
     subject: 'Document Submitted: {{documentName}} - {{projectName}}',
     body: `<p>Hi {{displayName}},</p>
-<p>Your document has been submitted successfully!</p>
+<p>Your documents have been submitted successfully!</p>
 <table>
   <tr><td class="detail-label">Project</td><td>{{projectName}}</td></tr>
   <tr><td class="detail-label">Category</td><td>{{categoryLabel}}</td></tr>
   <tr><td class="detail-label">Document</td><td>{{documentName}}</td></tr>
-  <tr><td class="detail-label">File</td><td>{{filename}}</td></tr>
+  <tr><td class="detail-label">Files ({{fileCount}})</td><td>{{fileList}}</td></tr>
   <tr><td class="detail-label">Status</td><td><span class="status-badge status-pending">Pending Review</span></td></tr>
 </table>
 <p>Our team will review your submission shortly. You'll be notified once it's processed.</p>
 <p style="text-align: center;">
   <a href="{{portalUrl}}" class="btn">View Your Projects</a>
 </p>`,
-    variables: ['displayName', 'projectName', 'categoryLabel', 'documentName', 'filename', 'portalUrl']
+    variables: ['displayName', 'projectName', 'categoryLabel', 'documentName', 'filename', 'fileList', 'fileCount', 'portalUrl']
   },
   {
     key: 'adminDocumentSubmission',
@@ -125,19 +125,19 @@ export const DEFAULT_TEMPLATES: TemplateDefault[] = [
     senderName: FROM_NAME,
     senderEmail: FROM_EMAIL,
     subject: 'Document Submitted by {{displayName}} - {{projectName}}',
-    body: `<p>A client has submitted a document:</p>
+    body: `<p>A client has submitted documents:</p>
 <table>
   <tr><td class="detail-label">Client</td><td>{{displayName}}</td></tr>
   <tr><td class="detail-label">Project</td><td>{{projectName}}</td></tr>
   <tr><td class="detail-label">Category</td><td>{{categoryLabel}}</td></tr>
   <tr><td class="detail-label">Document</td><td>{{documentName}}</td></tr>
-  <tr><td class="detail-label">File</td><td>{{filename}}</td></tr>
+  <tr><td class="detail-label">Files ({{fileCount}})</td><td>{{fileList}}</td></tr>
   <tr><td class="detail-label">Time</td><td>{{time}}</td></tr>
 </table>
 <p style="text-align: center; margin-top: 24px;">
   <a href="{{adminUrl}}" class="btn">Review in Admin</a>
 </p>`,
-    variables: ['displayName', 'userEmail', 'projectName', 'categoryLabel', 'documentName', 'filename', 'time', 'adminUrl']
+    variables: ['displayName', 'userEmail', 'projectName', 'categoryLabel', 'documentName', 'filename', 'fileList', 'fileCount', 'time', 'adminUrl']
   },
   {
     key: 'weeklyUpdate',

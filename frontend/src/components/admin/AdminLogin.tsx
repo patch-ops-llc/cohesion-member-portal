@@ -21,22 +21,26 @@ export function AdminLogin() {
     setError(null);
 
     try {
-      // Test the API key by making a request
-      const response = await fetch('/api/admin/stats', {
+      // Validate against /verify, which checks the key and nothing else.
+      // This used to call /stats, which reads HubSpot — so any HubSpot outage
+      // locked staff out with a misleading "Invalid API key".
+      const response = await fetch('/api/admin/verify', {
         headers: {
           'X-API-Key': apiKey.trim()
         }
       });
 
       if (response.ok) {
-        // Store the API key and redirect
         localStorage.setItem('admin_api_key', apiKey.trim());
         navigate('/admin');
-      } else {
+      } else if (response.status === 401) {
         setError('Invalid API key');
+      } else {
+        // Distinguish "your key is wrong" from "the server is unwell".
+        setError('The server could not verify your key right now. Please try again shortly.');
       }
     } catch {
-      setError('Failed to verify API key');
+      setError('Could not reach the server. Check your connection and try again.');
     } finally {
       setIsLoading(false);
     }

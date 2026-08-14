@@ -16,6 +16,7 @@ import {
   getUploadDigestSchedule
 } from './settings';
 import { getNormalizedStage } from '../utils/documentData';
+import { retryPendingTransfers } from './fileIngest';
 
 const TIMEZONE = 'America/Chicago';
 
@@ -385,8 +386,38 @@ export async function scheduleClientDigest(): Promise<void> {
   });
 }
 
+// Retry uploads that reached the bucket but failed to reach HubSpot, so a
+// HubSpot outage heals itself once the API recovers instead of leaving client
+// submissions stranded until someone notices.
+let transferRetryTask: ScheduledTask | null = null;
+
+function scheduleTransferRetries(): void {
+  if (transferRetryTask) transferRetryTask.stop();
+  transferRetryTask = cron.schedule('*/5 * * * *', async () => {
+    try {
+      await retryPendingTransfers();
+    } catch (err) {
+      logger.error('Transfer retry sweep failed', { error: String(err) });
+    }
+  });
+  logger.info('HubSpot transfer retry sweep scheduled', { every: '5 minutes' });
+}
+
 export async function startScheduler(): Promise<void> {
   await scheduleUploadDigest();
   await scheduleClientDigest();
+  scheduleTransferRetries();
+
+  // Resume anything stranded by the previous container. A redeploy kills the
+  // in-process push, but the file is still on the volume and its row still says
+  // it hasn't reached HubSpot — so the new container picks up where the old one
+  // stopped. Without this, a deploy timed badly would leave a client's document
+  // sitting in staging indefinitely while they believe it was submitted.
+  retryPendingTransfers(0)
+    .then(count => {
+      if (count > 0) logger.info('Resumed staged uploads after restart', { count });
+    })
+    .catch(err => logger.error('Resume sweep failed on boot', { error: String(err) }));
+
   logger.info('Scheduler started with configured schedules');
 }

@@ -349,15 +349,28 @@ export async function updateDocumentData(projectId: string, documentData: Docume
   }
 }
 
-// Upload file to HubSpot File Manager
+// Upload file to HubSpot File Manager.
+//
+// Streams from disk rather than buffering: at a 50 MB ceiling, reading the
+// whole file into memory would be a per-upload memory spike on a small dyno.
+// maxBodyLength/maxContentLength are set explicitly because axios defaults to
+// a 10 MB body cap, which silently breaks large uploads.
 export async function uploadFileToHubSpot(
   filePath: string,
   fileName: string,
-  folderId?: string
+  folderId?: string,
+  contentType?: string
 ): Promise<string> {
   try {
     const form = new FormData();
-    form.append('file', fs.createReadStream(filePath));
+    // The filename MUST be set explicitly. form-data otherwise derives it from
+    // the read stream's path, which is multer's random temp name with no
+    // extension — HubSpot then stores the file as "3604d08cfc65…" of unknown
+    // type, and downloads arrive with no extension and an unopenable name.
+    form.append('file', fs.createReadStream(filePath), {
+      filename: fileName,
+      ...(contentType ? { contentType } : {})
+    });
     form.append('options', JSON.stringify({ access: 'PUBLIC_INDEXABLE' }));
     if (folderId) {
       form.append('folderId', folderId);
@@ -371,7 +384,9 @@ export async function uploadFileToHubSpot(
         headers: {
           Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
           ...form.getHeaders()
-        }
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity
       }
     );
 
@@ -380,6 +395,42 @@ export async function uploadFileToHubSpot(
   } catch (error) {
     logger.error('Failed to upload file to HubSpot', { fileName, error: String(error) });
     throw error;
+  }
+}
+
+// Resolve a file's current download URL from HubSpot.
+//
+// Looked up on demand rather than cached alongside the file id: HubSpot's URLs
+// embed the folder path, so a rename or folder move in the CRM would silently
+// invalidate a stored copy and break downloads. This also means files uploaded
+// before this feature existed are downloadable with no backfill.
+export async function getFileUrl(fileId: string): Promise<string | null> {
+  try {
+    const response = await axios.get<{ url?: string }>(
+      `https://api.hubapi.com/files/v3/files/${fileId}`,
+      { headers: { Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}` } }
+    );
+    return response.data.url ?? null;
+  } catch (error) {
+    logger.error('Failed to resolve HubSpot file URL', { fileId, error: String(error) });
+    return null;
+  }
+}
+
+// Archive a file in HubSpot File Manager. Used when a client removes an upload
+// before review — best-effort, since losing the remote copy must not block the
+// local delete.
+export async function deleteFileFromHubSpot(fileId: string): Promise<void> {
+  try {
+    await axios.delete(`https://api.hubapi.com/files/v3/files/${fileId}`, {
+      headers: { Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}` }
+    });
+    logger.info('Deleted file from HubSpot', { fileId });
+  } catch (error) {
+    logger.warn('Failed to delete file from HubSpot (continuing)', {
+      fileId,
+      error: String(error)
+    });
   }
 }
 

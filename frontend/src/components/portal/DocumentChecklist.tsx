@@ -1,5 +1,7 @@
 import { personalCategories, entityCategories } from '../../types';
-import type { DocumentData, CategoryData, DocumentStatus } from '../../types';
+import type {
+  DocumentData, CategoryData, DocumentStatus, SubmittedFile, FileReviewStatus
+} from '../../types';
 import { CategorySection } from './CategorySection';
 
 interface DocumentChecklistProps {
@@ -12,9 +14,26 @@ interface DocumentChecklistProps {
   onRemoveDocument: (categoryKey: string, docIndex: number) => void;
   /** Called when file upload succeeds - updates status to pending_review in real time */
   onUploadSuccess?: (categoryKey: string, docIndex: number) => void;
+  /** All files for the project; grouped here so the list is fetched once */
+  files?: SubmittedFile[];
+  onDeleteFile?: (fileId: string) => Promise<void> | void;
+  onReviewFile?: (fileId: string, status: FileReviewStatus) => Promise<void> | void;
   /** When true, client view: hide add/edit/remove, show only upload */
   clientMode?: boolean;
   isSaving?: boolean;
+}
+
+// Group a project's files by category and document index, so each row can be
+// handed just its own files without every row filtering the whole list.
+function groupFiles(files: SubmittedFile[]): Record<string, Record<number, SubmittedFile[]>> {
+  const grouped: Record<string, Record<number, SubmittedFile[]>> = {};
+  for (const file of files) {
+    if (file.documentIndex === null) continue;
+    grouped[file.categoryKey] ??= {};
+    grouped[file.categoryKey][file.documentIndex] ??= [];
+    grouped[file.categoryKey][file.documentIndex].push(file);
+  }
+  return grouped;
 }
 
 export function DocumentChecklist({
@@ -26,12 +45,16 @@ export function DocumentChecklist({
   onUpdateDocumentStatus,
   onRemoveDocument,
   onUploadSuccess,
+  files = [],
+  onDeleteFile,
+  onReviewFile,
   clientMode = false,
   isSaving = false
 }: DocumentChecklistProps) {
   const selectedSections = documentData._meta?.selectedSections || ['personal'];
   const showPersonal = selectedSections.includes('personal');
   const showEntity = selectedSections.includes('entity');
+  const filesByCategory = groupFiles(files);
 
   // Sort: active categories first
   const sortByActive = (cats: typeof personalCategories) =>
@@ -68,6 +91,9 @@ export function DocumentChecklist({
                   }
                   onRemoveDocument={(docIndex) => onRemoveDocument(cat.key, docIndex)}
                   onUploadSuccess={onUploadSuccess ? (docIndex) => onUploadSuccess(cat.key, docIndex) : undefined}
+                  filesByIndex={filesByCategory[cat.key] || {}}
+                  onDeleteFile={onDeleteFile}
+                  onReviewFile={onReviewFile}
                   clientMode={clientMode}
                   isSaving={isSaving}
                 />
@@ -102,6 +128,9 @@ export function DocumentChecklist({
                   }
                   onRemoveDocument={(docIndex) => onRemoveDocument(cat.key, docIndex)}
                   onUploadSuccess={onUploadSuccess ? (docIndex) => onUploadSuccess(cat.key, docIndex) : undefined}
+                  filesByIndex={filesByCategory[cat.key] || {}}
+                  onDeleteFile={onDeleteFile}
+                  onReviewFile={onReviewFile}
                   clientMode={clientMode}
                   isSaving={isSaving}
                 />
