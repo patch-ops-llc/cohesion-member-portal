@@ -855,7 +855,7 @@ export async function getProjectsForUser(email: string, contactId: string | null
     const reason = getAdvisoryHideReason(projectAdvisorySignals(project));
     if (reason) {
       hiddenAdvisory += 1;
-      logger.info('Hiding advisory project from client portal', {
+      logger.info('Hiding non-tax project from client portal', {
         email,
         projectId: project.id,
         name: project.properties.client_project_name,

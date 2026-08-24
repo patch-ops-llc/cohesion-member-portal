@@ -149,26 +149,6 @@ export function getNormalizedStage(pipelineStageId: string): string {
   return 'collecting';
 }
 
-const ADVISORY_STAGE_IDS = new Set([
-  'advisory_data_entry',
-  'advisory_data_review',
-  'advisory_prepare_reports',
-  'advisory_deliver_reports'
-]);
-
-// Categories that only exist on advisory projects (tax shares general_ledger).
-const ADVISORY_DOCUMENT_KEYS = new Set([
-  'financial_statements',
-  'accounts_receivable_aging',
-  'bank_account_s_',
-  'credit_card_account_s_',
-  'line_of_credit',
-  'loan_statement_s_',
-  'payroll_report_s_',
-  'sales_report_s_',
-  'new_asset_purchase'
-]);
-
 export interface AdvisoryProjectSignals {
   name?: string | null;
   pipelineStage?: string | null;
@@ -177,48 +157,17 @@ export interface AdvisoryProjectSignals {
 }
 
 /**
- * Advisory work is staff-only. Clients should never see these in the portal.
- *
- * Pipeline/stage is the source of truth: a known tax stage always shows,
- * even if the record was created as advisory and still has that name or
- * leftover advisory document_data keys. Name/document_data are fallbacks
- * only when the stage is not a mapped tax stage.
+ * Client portal is tax-only. Show a project only when its current
+ * hs_pipeline_stage is a mapped tax stage. Advisory stages are numeric
+ * HubSpot IDs, so name/document_data leftovers must not decide visibility
+ * after someone toggles the pipeline.
  */
 export function getAdvisoryHideReason(input: AdvisoryProjectSignals): string | null {
   const stage = (input.pipelineStage || '').trim();
-  const stageLower = stage.toLowerCase();
-
   if (stage && taxStageLabels[stage]) {
     return null;
   }
-
-  if (stageLower.includes('advisory') || ADVISORY_STAGE_IDS.has(stageLower)) {
-    return `stage:${stage}`;
-  }
-
-  const pipeline = (input.pipeline || '').toLowerCase().trim();
-  if (pipeline.includes('advisory')) {
-    return `pipeline:${input.pipeline}`;
-  }
-
-  const name = (input.name || '').toLowerCase();
-  if (
-    name.includes('advisory') ||
-    name.includes('financial report') ||
-    name.includes('bookkeeping')
-  ) {
-    return `name:${input.name}`;
-  }
-
-  if (input.documentData) {
-    for (const key of Object.keys(input.documentData)) {
-      if (ADVISORY_DOCUMENT_KEYS.has(key)) {
-        return `document_data:${key}`;
-      }
-    }
-  }
-
-  return null;
+  return `not_tax_stage:${stage || 'empty'}`;
 }
 
 export function isAdvisoryProject(input: AdvisoryProjectSignals): boolean {
