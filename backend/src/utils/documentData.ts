@@ -178,18 +178,27 @@ export interface AdvisoryProjectSignals {
 
 /**
  * Advisory work is staff-only. Clients should never see these in the portal.
- * Matches the same signals the legacy WordPress portal used (stage + name),
- * plus advisory-only document_data keys and an optional pipeline id/label.
+ *
+ * Pipeline/stage is the source of truth: a known tax stage always shows,
+ * even if the record was created as advisory and still has that name or
+ * leftover advisory document_data keys. Name/document_data are fallbacks
+ * only when the stage is not a mapped tax stage.
  */
-export function isAdvisoryProject(input: AdvisoryProjectSignals): boolean {
-  const stage = (input.pipelineStage || '').toLowerCase().trim();
-  if (stage.includes('advisory') || ADVISORY_STAGE_IDS.has(stage)) {
-    return true;
+export function getAdvisoryHideReason(input: AdvisoryProjectSignals): string | null {
+  const stage = (input.pipelineStage || '').trim();
+  const stageLower = stage.toLowerCase();
+
+  if (stage && taxStageLabels[stage]) {
+    return null;
+  }
+
+  if (stageLower.includes('advisory') || ADVISORY_STAGE_IDS.has(stageLower)) {
+    return `stage:${stage}`;
   }
 
   const pipeline = (input.pipeline || '').toLowerCase().trim();
   if (pipeline.includes('advisory')) {
-    return true;
+    return `pipeline:${input.pipeline}`;
   }
 
   const name = (input.name || '').toLowerCase();
@@ -198,17 +207,21 @@ export function isAdvisoryProject(input: AdvisoryProjectSignals): boolean {
     name.includes('financial report') ||
     name.includes('bookkeeping')
   ) {
-    return true;
+    return `name:${input.name}`;
   }
 
   if (input.documentData) {
     for (const key of Object.keys(input.documentData)) {
       if (ADVISORY_DOCUMENT_KEYS.has(key)) {
-        return true;
+        return `document_data:${key}`;
       }
     }
   }
 
-  return false;
+  return null;
+}
+
+export function isAdvisoryProject(input: AdvisoryProjectSignals): boolean {
+  return getAdvisoryHideReason(input) !== null;
 }
 

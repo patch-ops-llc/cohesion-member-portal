@@ -3,7 +3,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 import { logger } from '../utils/logger';
-import { isAdvisoryProject } from '../utils/documentData';
+import { getAdvisoryHideReason } from '../utils/documentData';
 
 const hubspotClient = new Client({ 
   accessToken: process.env.HUBSPOT_ACCESS_TOKEN 
@@ -823,13 +823,17 @@ export async function getProjectsByContactAssociation(contactId: string): Promis
   }
 }
 
-export function projectIsAdvisory(project: Project): boolean {
-  return isAdvisoryProject({
+export function projectAdvisorySignals(project: Project) {
+  return {
     name: project.properties.client_project_name,
     pipelineStage: project.properties.hs_pipeline_stage,
     pipeline: project.properties.hs_pipeline,
     documentData: parseDocumentData(project.properties.document_data)
-  });
+  };
+}
+
+export function projectIsAdvisory(project: Project): boolean {
+  return getAdvisoryHideReason(projectAdvisorySignals(project)) !== null;
 }
 
 // Combine email-matched and association-matched projects (deduplicated)
@@ -845,8 +849,24 @@ export async function getProjectsForUser(email: string, contactId: string | null
     if (!projectMap.has(p.id)) projectMap.set(p.id, p);
   }
 
-  const visible = Array.from(projectMap.values()).filter(p => !projectIsAdvisory(p));
-  const hiddenAdvisory = projectMap.size - visible.length;
+  const visible: Project[] = [];
+  let hiddenAdvisory = 0;
+  for (const project of projectMap.values()) {
+    const reason = getAdvisoryHideReason(projectAdvisorySignals(project));
+    if (reason) {
+      hiddenAdvisory += 1;
+      logger.info('Hiding advisory project from client portal', {
+        email,
+        projectId: project.id,
+        name: project.properties.client_project_name,
+        stage: project.properties.hs_pipeline_stage,
+        pipeline: project.properties.hs_pipeline,
+        reason
+      });
+      continue;
+    }
+    visible.push(project);
+  }
 
   logger.info('Combined project lookup', {
     email,
