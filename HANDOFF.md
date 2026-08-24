@@ -178,7 +178,7 @@ type DocumentStatus =
 
 ### Document Categories
 
-**Personal Tax Return (10 categories):**
+**Personal Tax Return (11 categories):**
 ```typescript
 const personalCategories = [
   { key: 'w_2s', label: 'W-2s' },
@@ -190,6 +190,7 @@ const personalCategories = [
   { key: 'charitable_donations', label: 'Charitable Donations' },
   { key: 'livestock_sales_and_expenses', label: 'Livestock Sales and Expenses' },
   { key: 'foreign_bank_accounts', label: 'Foreign Bank Accounts' },
+  { key: 'additional_documents', label: 'Additional Documents' },
   { key: 'previous_personal_tax_returns', label: 'Previous Personal Tax Returns' }
 ];
 ```
