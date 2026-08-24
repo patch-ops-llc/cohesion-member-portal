@@ -3,6 +3,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 import { logger } from '../utils/logger';
+import { isAdvisoryProject } from '../utils/documentData';
 
 const hubspotClient = new Client({ 
   accessToken: process.env.HUBSPOT_ACCESS_TOKEN 
@@ -42,6 +43,7 @@ export function normalizeFolderUrl(fileDirectory?: string | null): string | null
 export interface ProjectProperties {
   client_project_name: string;
   email: string;
+  hs_pipeline?: string;
   hs_pipeline_stage: string;
   document_data: string;
   file_directory?: string;
@@ -77,7 +79,7 @@ export async function getProject(projectId: string): Promise<Project> {
     const response = await hubspotClient.crm.objects.basicApi.getById(
       CUSTOM_OBJECT_TYPE,
       projectId,
-      ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data', 'file_directory', 'cc_email']
+      ['client_project_name', 'email', 'hs_pipeline', 'hs_pipeline_stage', 'document_data', 'file_directory', 'cc_email']
     );
     return {
       id: response.id,
@@ -100,7 +102,7 @@ export async function getProjectsByEmail(email: string): Promise<Project[]> {
         CUSTOM_OBJECT_TYPE,
         100,
         after,
-        ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data', 'cc_email']
+        ['client_project_name', 'email', 'hs_pipeline', 'hs_pipeline_stage', 'document_data', 'cc_email']
       );
 
       const matching = response.results.filter(
@@ -134,7 +136,7 @@ export async function getAllProjects(): Promise<{ projects: Project[] }> {
         CUSTOM_OBJECT_TYPE,
         100,
         after,
-        ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data', 'cc_email']
+        ['client_project_name', 'email', 'hs_pipeline', 'hs_pipeline_stage', 'document_data', 'cc_email']
       );
 
       allProjects.push(...response.results.map(p => ({
@@ -771,7 +773,7 @@ export async function associateProjectWithContact(projectId: string, contactId: 
   }
 }
 
-const PROJECT_PROPERTIES = ['client_project_name', 'email', 'hs_pipeline_stage', 'document_data', 'cc_email'];
+const PROJECT_PROPERTIES = ['client_project_name', 'email', 'hs_pipeline', 'hs_pipeline_stage', 'document_data', 'cc_email'];
 
 // Get projects associated with a contact via CRM associations
 export async function getProjectsByContactAssociation(contactId: string): Promise<Project[]> {
@@ -821,6 +823,15 @@ export async function getProjectsByContactAssociation(contactId: string): Promis
   }
 }
 
+export function projectIsAdvisory(project: Project): boolean {
+  return isAdvisoryProject({
+    name: project.properties.client_project_name,
+    pipelineStage: project.properties.hs_pipeline_stage,
+    pipeline: project.properties.hs_pipeline,
+    documentData: parseDocumentData(project.properties.document_data)
+  });
+}
+
 // Combine email-matched and association-matched projects (deduplicated)
 export async function getProjectsForUser(email: string, contactId: string | null): Promise<Project[]> {
   const [emailProjects, assocProjects] = await Promise.all([
@@ -834,15 +845,20 @@ export async function getProjectsForUser(email: string, contactId: string | null
     if (!projectMap.has(p.id)) projectMap.set(p.id, p);
   }
 
+  const visible = Array.from(projectMap.values()).filter(p => !projectIsAdvisory(p));
+  const hiddenAdvisory = projectMap.size - visible.length;
+
   logger.info('Combined project lookup', {
     email,
     contactId,
     emailCount: emailProjects.length,
     assocCount: assocProjects.length,
-    totalUnique: projectMap.size
+    totalUnique: projectMap.size,
+    hiddenAdvisory,
+    clientVisible: visible.length
   });
 
-  return Array.from(projectMap.values());
+  return visible;
 }
 
 // Check if a user has access to a specific project (by email match or association)
@@ -852,6 +868,11 @@ export async function userHasProjectAccess(
   contactId: string | null
 ): Promise<boolean> {
   const project = await getProject(projectId);
+
+  if (projectIsAdvisory(project)) {
+    logger.info('Denied client access to advisory project', { projectId, email });
+    return false;
+  }
 
   // Check 1: email match
   if (project.properties.email?.toLowerCase().trim() === email.toLowerCase().trim()) {

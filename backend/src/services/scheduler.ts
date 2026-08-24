@@ -179,6 +179,8 @@ async function gatherClientDigests(): Promise<ClientDigest[]> {
   const byEmail = new Map<string, { projects: hubspot.Project[]; cc: Set<string> }>();
 
   for (const project of projects) {
+    if (hubspot.projectIsAdvisory(project)) continue;
+
     const email = project.properties.email?.toLowerCase().trim();
     if (!email) continue;
 

@@ -155,6 +155,7 @@ export const personalCategories: CategoryDefinition[] = [
   { key: 'charitable_donations', label: 'Charitable Donations' },
   { key: 'livestock_sales_and_expenses', label: 'Livestock Sales and Expenses' },
   { key: 'foreign_bank_accounts', label: 'Foreign Bank Accounts' },
+  { key: 'additional_documents', label: 'Additional Documents' },
   { key: 'previous_personal_tax_returns', label: 'Previous Personal Tax Returns' }
 ];
 

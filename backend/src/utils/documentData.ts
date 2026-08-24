@@ -1,4 +1,4 @@
-import { DocumentData, CategoryData } from '../services/hubspot';
+import type { DocumentData, CategoryData } from '../services/hubspot';
 
 export interface ModifiedFields {
   sections: boolean;
@@ -95,6 +95,7 @@ export const personalCategories = [
   { key: 'charitable_donations', label: 'Charitable Donations' },
   { key: 'livestock_sales_and_expenses', label: 'Livestock Sales and Expenses' },
   { key: 'foreign_bank_accounts', label: 'Foreign Bank Accounts' },
+  { key: 'additional_documents', label: 'Additional Documents' },
   { key: 'previous_personal_tax_returns', label: 'Previous Personal Tax Returns' }
 ];
 
@@ -146,5 +147,68 @@ export function getNormalizedStage(pipelineStageId: string): string {
   if (stageLabel === 'Return Accepted') return 'accepted';
   
   return 'collecting';
+}
+
+const ADVISORY_STAGE_IDS = new Set([
+  'advisory_data_entry',
+  'advisory_data_review',
+  'advisory_prepare_reports',
+  'advisory_deliver_reports'
+]);
+
+// Categories that only exist on advisory projects (tax shares general_ledger).
+const ADVISORY_DOCUMENT_KEYS = new Set([
+  'financial_statements',
+  'accounts_receivable_aging',
+  'bank_account_s_',
+  'credit_card_account_s_',
+  'line_of_credit',
+  'loan_statement_s_',
+  'payroll_report_s_',
+  'sales_report_s_',
+  'new_asset_purchase'
+]);
+
+export interface AdvisoryProjectSignals {
+  name?: string | null;
+  pipelineStage?: string | null;
+  pipeline?: string | null;
+  documentData?: DocumentData | null;
+}
+
+/**
+ * Advisory work is staff-only. Clients should never see these in the portal.
+ * Matches the same signals the legacy WordPress portal used (stage + name),
+ * plus advisory-only document_data keys and an optional pipeline id/label.
+ */
+export function isAdvisoryProject(input: AdvisoryProjectSignals): boolean {
+  const stage = (input.pipelineStage || '').toLowerCase().trim();
+  if (stage.includes('advisory') || ADVISORY_STAGE_IDS.has(stage)) {
+    return true;
+  }
+
+  const pipeline = (input.pipeline || '').toLowerCase().trim();
+  if (pipeline.includes('advisory')) {
+    return true;
+  }
+
+  const name = (input.name || '').toLowerCase();
+  if (
+    name.includes('advisory') ||
+    name.includes('financial report') ||
+    name.includes('bookkeeping')
+  ) {
+    return true;
+  }
+
+  if (input.documentData) {
+    for (const key of Object.keys(input.documentData)) {
+      if (ADVISORY_DOCUMENT_KEYS.has(key)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
