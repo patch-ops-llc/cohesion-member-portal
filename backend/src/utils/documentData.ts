@@ -84,6 +84,20 @@ export function mergeDocumentData(
   return merged;
 }
 
+/**
+ * Documents the client should see for a category.
+ * A checked category with no named document still needs one upload slot.
+ * The category label (P&L, Balance Sheet, and so on) is that slot's name.
+ * Whitespace-only names are treated as blank — a space does not count.
+ */
+export function documentsVisibleToClient(category: CategoryData): { name: string; status: CategoryData['documents'][number]['status'] }[] {
+  const named = (category.documents || []).filter((doc) => (doc.name || '').trim() !== '');
+  if (named.length > 0) return named;
+  if (category.status !== 'active') return [];
+  const name = (category.label || '').trim() || 'Document';
+  return [{ name, status: 'not_submitted' }];
+}
+
 // Category definitions
 export const personalCategories = [
   { key: 'w_2s', label: 'W-2s' },

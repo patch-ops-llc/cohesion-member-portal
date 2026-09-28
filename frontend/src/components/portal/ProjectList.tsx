@@ -7,6 +7,7 @@ import { ErrorMessage } from '../shared/ErrorBoundary';
 import { PizzaTrackerMini } from './PizzaTracker';
 import type { Project, CategoryData } from '../../types';
 import { pipelineStages } from '../../types';
+import { clientDocumentRows } from '../../utils/clientDocuments';
 
 export function ProjectList() {
   const { data: projects, isLoading, error, refetch } = useProjects();
@@ -157,8 +158,10 @@ function getCategoryBreakdown(documentData?: Project['documentData']): { label: 
   for (const key of Object.keys(documentData)) {
     if (key === '_meta') continue;
     const category = documentData[key] as CategoryData;
-    if (category.status === 'active' && category.documents?.length) {
-      breakdown.push({ label: category.label, count: category.documents.length });
+    if (category.status !== 'active') continue;
+    const visible = clientDocumentRows(category, category.label || key);
+    if (visible.length > 0) {
+      breakdown.push({ label: category.label || visible[0].doc.name, count: visible.length });
     }
   }
   return breakdown;
@@ -172,14 +175,12 @@ function calculateStats(documentData?: Project['documentData']) {
   for (const key of Object.keys(documentData)) {
     if (key === '_meta') continue;
     const category = documentData[key] as CategoryData;
-    if (category.documents) {
-      for (const doc of category.documents) {
-        stats.total++;
-        if (doc.status === 'pending_review') stats.pending++;
-        if (doc.status === 'accepted') stats.accepted++;
-        if (doc.status === 'needs_resubmission' || doc.status === 'missing_files') {
-          stats.needsAction++;
-        }
+    for (const { doc } of clientDocumentRows(category, category.label || key)) {
+      stats.total++;
+      if (doc.status === 'pending_review') stats.pending++;
+      if (doc.status === 'accepted') stats.accepted++;
+      if (doc.status === 'needs_resubmission' || doc.status === 'missing_files') {
+        stats.needsAction++;
       }
     }
   }

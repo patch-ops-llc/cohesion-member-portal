@@ -70,8 +70,25 @@ export async function syncDocumentStatusFromFiles(
   const hubspotData = hubspot.parseDocumentData(project.properties.document_data);
 
   const category = hubspotData[categoryKey] as hubspot.CategoryData | undefined;
-  const document = category?.documents?.[documentIndex];
-  if (!category || !document) {
+  if (!category) {
+    logger.warn('Cannot sync status: category not found in document_data', {
+      projectId,
+      categoryKey,
+      documentIndex
+    });
+    return null;
+  }
+
+  const named = (category.documents || []).filter((doc) => (doc.name || '').trim() !== '');
+  // Checked category, no document name: the client uploads against one slot
+  // labeled with the category. Create that row on the first file so status
+  // tracking has something to update. Do not invent the row before a file
+  // exists — that would mark the checklist incomplete with nothing submitted.
+  const implicitSlot =
+    category.status === 'active' && named.length === 0 && documentIndex === 0 && files.length > 0;
+
+  const document = category.documents?.[documentIndex];
+  if (!document && !implicitSlot) {
     logger.warn('Cannot sync status: document not found in document_data', {
       projectId,
       categoryKey,
@@ -80,20 +97,34 @@ export async function syncDocumentStatusFromFiles(
     return null;
   }
 
-  const currentStatus = document.status as DocumentStatus;
+  const currentStatus = (document?.status as DocumentStatus) || 'not_submitted';
   const nextStatus = rollUpStatus(files, currentStatus);
-  if (nextStatus === currentStatus) return currentStatus;
 
-  // Local copy carrying only the status change we intend to make.
   const localData: hubspot.DocumentData = JSON.parse(JSON.stringify(hubspotData));
-  (localData[categoryKey] as hubspot.CategoryData).documents[documentIndex].status = nextStatus;
+  const localCategory = localData[categoryKey] as hubspot.CategoryData;
+  let modifiedFields: ModifiedFields;
 
-  const modifiedFields: ModifiedFields = {
-    sections: false,
-    categories: {},
-    documents: {},
-    statuses: { [categoryKey]: { [documentIndex]: true } }
-  };
+  if (implicitSlot) {
+    localCategory.documents = [{
+      name: (category.label || '').trim() || categoryKey,
+      status: nextStatus
+    }];
+    modifiedFields = {
+      sections: false,
+      categories: { [categoryKey]: true },
+      documents: {},
+      statuses: {}
+    };
+  } else {
+    if (nextStatus === currentStatus) return currentStatus;
+    localCategory.documents[documentIndex].status = nextStatus;
+    modifiedFields = {
+      sections: false,
+      categories: {},
+      documents: {},
+      statuses: { [categoryKey]: { [documentIndex]: true } }
+    };
+  }
 
   const merged = mergeDocumentData(hubspotData, localData, modifiedFields);
   await hubspot.updateDocumentData(projectId, merged);

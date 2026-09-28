@@ -5,6 +5,7 @@ import type {
   DocumentEntry, CategoryStatus, DocumentStatus, SubmittedFile, FileReviewStatus
 } from '../../types';
 import { DocumentItem } from './DocumentItem';
+import { clientDocumentRows } from '../../utils/clientDocuments';
 
 interface CategorySectionProps {
   projectId: string;
@@ -52,8 +53,13 @@ export function CategorySection({
 
   const isActive = status === 'active';
 
-  // Count statuses
-  const statusCounts = documents.reduce((acc, doc) => {
+  // Client view: a checked category with no document name still gets one
+  // upload row, labeled with the category (P&L, Balance Sheet, and so on).
+  const rows = clientMode
+    ? clientDocumentRows({ status, documents, label }, label)
+    : documents.map((doc, index) => ({ doc, index }));
+
+  const statusCounts = rows.reduce((acc, { doc }) => {
     acc[doc.status] = (acc[doc.status] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
@@ -92,7 +98,7 @@ export function CategorySection({
           <span className="font-medium text-gray-900">{label}</span>
           
           {/* Status badges */}
-          {documents.length > 0 && (
+          {rows.length > 0 && (
             <div className="flex items-center space-x-1 ml-2">
               {statusCounts['accepted'] > 0 && (
                 <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700">
@@ -130,7 +136,7 @@ export function CategorySection({
             </button>
           )}
           <span className="text-sm text-gray-500">
-            {documents.length} document{documents.length !== 1 ? 's' : ''}
+            {rows.length} document{rows.length !== 1 ? 's' : ''}
           </span>
         </div>
       </div>
@@ -138,12 +144,12 @@ export function CategorySection({
       {/* Documents */}
       {isExpanded && isActive && (
         <div className="border-t border-gray-200 p-4 space-y-3">
-          {documents.length === 0 ? (
+          {rows.length === 0 ? (
             <p className="text-gray-500 text-sm text-center py-4">
               No documents added yet
             </p>
           ) : (
-            documents.map((doc, index) => (
+            rows.map(({ doc, index }) => (
               <DocumentItem
                 key={index}
                 projectId={projectId}

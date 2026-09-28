@@ -15,7 +15,7 @@ import {
   getWeeklyClientDigestSchedule,
   getUploadDigestSchedule
 } from './settings';
-import { getNormalizedStage } from '../utils/documentData';
+import { documentsVisibleToClient, getNormalizedStage } from '../utils/documentData';
 import { retryPendingTransfers } from './fileIngest';
 
 const TIMEZONE = 'America/Chicago';
@@ -151,8 +151,8 @@ function summarizeProject(project: hubspot.Project): WeeklyProjectSummary {
   for (const key of Object.keys(documentData)) {
     if (key === '_meta') continue;
     const category = documentData[key] as hubspot.CategoryData;
-    if (category.status !== 'active' || !category.documents) continue;
-    for (const doc of category.documents) {
+    if (category.status !== 'active') continue;
+    for (const doc of documentsVisibleToClient(category)) {
       totalDocs++;
       if (doc.status === 'pending_review') pendingDocs++;
       if (doc.status === 'accepted') acceptedDocs++;

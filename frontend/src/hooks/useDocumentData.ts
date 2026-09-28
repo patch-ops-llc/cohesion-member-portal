@@ -195,7 +195,17 @@ export function useDocumentData({ initialData, onSave }: UseDocumentDataOptions)
       if (!category || 'selectedSections' in category) return prev;
 
       const documents = [...category.documents];
-      if (documents[docIndex]) {
+      if (documents[docIndex] && (documents[docIndex].name || '').trim()) {
+        documents[docIndex] = { ...documents[docIndex], status };
+      } else if (
+        category.status === 'active' &&
+        docIndex === 0 &&
+        !documents.some((doc) => (doc.name || '').trim())
+      ) {
+        // Checkbox-only category: the upload slot is not stored until a file
+        // arrives. Reflect the new status on that slot immediately.
+        documents[0] = { name: category.label || categoryKey, status };
+      } else if (documents[docIndex]) {
         documents[docIndex] = { ...documents[docIndex], status };
       }
 
