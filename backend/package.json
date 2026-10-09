@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "fix:file-directories": "tsx --env-file=.env src/scripts/fix-file-directory-urls.ts",
+    "tax-year:ensure": "tsx --env-file=.env src/scripts/ensure-tax-year-property.ts",
     "db:migrate": "prisma migrate dev",
     "db:migrate:prod": "prisma migrate deploy",
     "db:generate": "prisma generate",

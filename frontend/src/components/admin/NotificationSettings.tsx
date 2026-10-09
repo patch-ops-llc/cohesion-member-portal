@@ -334,7 +334,7 @@ export function AdminNotificationSettings() {
             <h3 className="font-semibold text-gray-900">Weekly Client Digest</h3>
           </div>
           <p className="text-xs text-gray-500 mt-0.5">
-            Sends each client a weekly email summarizing their project status and outstanding documents (every Monday at 8:00 AM Central). Individual clients can still opt out from their own notification settings.
+            Sends a weekly email only when a client has something in the Action column (not submitted, missing files, or needs resubmission) on a project still in Collecting Documents. Clients with nothing to do are skipped. Individual clients can still opt out from their own notification settings.
           </p>
         </div>
         <div className="flex items-center justify-between p-5">
@@ -342,7 +342,7 @@ export function AdminNotificationSettings() {
             <h4 className="text-sm font-semibold text-gray-900">Enable Weekly Digest</h4>
             <p className="text-sm text-gray-500 mt-0.5">
               {weeklyDigestEnabled
-                ? 'Clients receive a weekly status email automatically.'
+                ? 'Clients with documents that need their action receive a weekly email automatically.'
                 : 'Automatic weekly client emails are turned off.'}
             </p>
           </div>
@@ -360,7 +360,7 @@ export function AdminNotificationSettings() {
           <div className="flex items-center justify-between">
             <div>
               <h4 className="text-sm font-semibold text-gray-900">Send Now</h4>
-              <p className="text-xs text-gray-500 mt-0.5">Manually send the weekly digest to all clients immediately</p>
+              <p className="text-xs text-gray-500 mt-0.5">Send now to clients who have something in the Action column. Clients with nothing to do are skipped.</p>
             </div>
             <button
               type="button"

@@ -143,6 +143,14 @@ export const taxStageLabels: Record<string, string> = {
   "1742632657": "Return Accepted"
 };
 
+/**
+ * "Collecting Documents" stage id. New projects must be created into a mapped
+ * tax stage: getAdvisoryHideReason() fails closed on an unmapped stage, so a
+ * stage-less project is invisible to clients *and* to the rollover's
+ * already-exists scan.
+ */
+export const COLLECTING_DOCUMENTS_STAGE_ID = "1742632656";
+
 export const taxStages = [
   { id: "collecting", label: "Collecting Documents" },
   { id: "processing", label: "Processing Return" },
@@ -161,6 +169,37 @@ export function getNormalizedStage(pipelineStageId: string): string {
   if (stageLabel === 'Return Accepted') return 'accepted';
   
   return 'collecting';
+}
+
+/** True when the project is still in the "Collecting Documents" pipeline stage. */
+export function isInDocumentCollectionPhase(pipelineStageId: string | null | undefined): boolean {
+  return getNormalizedStage(pipelineStageId || '') === 'collecting';
+}
+
+/**
+ * Documents the client still has to deal with. This is the weekly email's
+ * Action column: not submitted, missing files, or needs resubmission, and
+ * only inside categories that are turned on.
+ */
+export function countClientActionNeeded(documentData: DocumentData | null | undefined): number {
+  if (!documentData) return 0;
+
+  let actionNeeded = 0;
+  for (const key of Object.keys(documentData)) {
+    if (key === '_meta') continue;
+    const category = documentData[key] as CategoryData;
+    if (category?.status !== 'active') continue;
+    for (const doc of documentsVisibleToClient(category)) {
+      if (
+        doc.status === 'needs_resubmission' ||
+        doc.status === 'missing_files' ||
+        doc.status === 'not_submitted'
+      ) {
+        actionNeeded++;
+      }
+    }
+  }
+  return actionNeeded;
 }
 
 export interface AdvisoryProjectSignals {

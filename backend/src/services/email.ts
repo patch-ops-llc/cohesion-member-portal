@@ -344,9 +344,9 @@ export async function sendWeeklyUpdateEmail(
   displayName: string,
   projects: WeeklyProjectSummary[],
   cc?: string[]
-): Promise<void> {
+): Promise<boolean> {
   const allowed = await shouldSendToUser(email, 'weekly_update');
-  if (!allowed) return;
+  if (!allowed) return false;
 
   const stageLabel = (s: string) => {
     switch (s) {
@@ -379,7 +379,7 @@ export async function sendWeeklyUpdateEmail(
         <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">
           <span class="status-badge status-pending">${p.pendingDocs}</span>
         </td>
-        <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">${p.actionNeeded}</td>
+        <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee; font-weight: 700; color: #9a3412;">${p.actionNeeded}</td>
       </tr>
       `).join('')}
     </table>`;
@@ -394,6 +394,7 @@ export async function sendWeeklyUpdateEmail(
   const body = interpolate(tpl.body, vars);
 
   await sendEmail(email, subject, wrapHtml(body), tpl.senderName, tpl.senderEmail, cc);
+  return true;
 }
 
 // ─── WEEKLY UPDATE (admin) ─────────────────────────────────────────────

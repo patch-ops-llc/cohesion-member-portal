@@ -1,11 +1,14 @@
 import prisma from '../db/client';
 import { logger } from '../utils/logger';
+import { isValidTaxYear, parseTaxYear } from '../utils/taxYear';
 
 const ADMIN_EMAILS_KEY = 'adminNotificationEmails';
 const WEEKLY_CLIENT_DIGEST_KEY = 'weeklyClientDigestEnabled';
 const WEEKLY_CLIENT_DIGEST_SCHEDULE_KEY = 'weeklyClientDigestSchedule';
 const UPLOAD_DIGEST_SCHEDULE_KEY = 'adminUploadDigestSchedule';
 const PORTAL_BANNER_KEY = 'portalBanner';
+const TAX_SEASON_KEY = 'taxSeason';
+const ROLLOVER_RUN_KEY = 'taxSeasonRolloverRun';
 
 // Timezones we allow admins to choose from (must be valid IANA names for node-cron).
 export const ALLOWED_TIMEZONES = [
@@ -277,4 +280,199 @@ export async function setUploadDigestSchedule(input: Partial<UploadDigestSchedul
     update: { value: JSON.stringify(next) }
   });
   return next;
+}
+
+// ─── Tax season ────────────────────────────────────────────────────────
+// Which season the portal considers current. Deliberately starts unset: with
+// no year configured the portal filter stays off, so deploying this cannot
+// silently hide a client's live project. An admin (or the rollover) sets it.
+
+export interface TaxSeasonSettings {
+  currentTaxYear: number | null;
+  hidePriorYearProjects: boolean;
+}
+
+const DEFAULT_TAX_SEASON: TaxSeasonSettings = {
+  currentTaxYear: null,
+  hidePriorYearProjects: true
+};
+
+export async function getTaxSeasonSettings(): Promise<TaxSeasonSettings> {
+  try {
+    const setting = await prisma.appSetting.findUnique({ where: { key: TAX_SEASON_KEY } });
+    if (setting) {
+      const parsed = JSON.parse(setting.value);
+      return {
+        currentTaxYear: parseTaxYear(parsed.currentTaxYear),
+        hidePriorYearProjects: parsed.hidePriorYearProjects !== false
+      };
+    }
+  } catch (err) {
+    logger.warn('Failed to read tax season settings, using default', { error: String(err) });
+  }
+  return { ...DEFAULT_TAX_SEASON };
+}
+
+export async function setTaxSeasonSettings(input: Partial<TaxSeasonSettings>): Promise<TaxSeasonSettings> {
+  const current = await getTaxSeasonSettings();
+  const requestedYear = input.currentTaxYear;
+
+  const next: TaxSeasonSettings = {
+    // Explicit null clears the season (turning the filter off); undefined keeps it.
+    currentTaxYear:
+      requestedYear === undefined
+        ? current.currentTaxYear
+        : requestedYear === null
+          ? null
+          : isValidTaxYear(requestedYear)
+            ? requestedYear
+            : current.currentTaxYear,
+    hidePriorYearProjects: input.hidePriorYearProjects ?? current.hidePriorYearProjects
+  };
+
+  await prisma.appSetting.upsert({
+    where: { key: TAX_SEASON_KEY },
+    create: { key: TAX_SEASON_KEY, value: JSON.stringify(next) },
+    update: { value: JSON.stringify(next) }
+  });
+
+  return next;
+}
+
+// ─── Rollover run state ────────────────────────────────────────────────
+// A rollover writes one HubSpot record per client, so it outlives an HTTP
+// request. State lives here so the admin UI can poll progress and so a second
+// caller can be refused while one is already in flight.
+
+export type RolloverStatus = 'idle' | 'running' | 'completed' | 'failed';
+
+export interface RolloverRunItem {
+  email: string;
+  sourceProjectId: string;
+  sourceName: string;
+  newProjectId?: string;
+  newName: string;
+  outcome: 'created' | 'failed';
+  error?: string;
+}
+
+export interface RolloverRun {
+  status: RolloverStatus;
+  targetYear: number | null;
+  total: number;
+  created: number;
+  failed: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  startedBy: string | null;
+  error: string | null;
+  items: RolloverRunItem[];
+}
+
+const IDLE_RUN: RolloverRun = {
+  status: 'idle',
+  targetYear: null,
+  total: 0,
+  created: 0,
+  failed: 0,
+  startedAt: null,
+  finishedAt: null,
+  startedBy: null,
+  error: null,
+  items: []
+};
+
+/**
+ * How long a `running` row may go untouched before we treat it as dead.
+ *
+ * This is a silence timeout, not a duration cap: the rollover rewrites this row
+ * after every client, so `updatedAt` is a heartbeat. Timing out on total
+ * elapsed time instead would declare a long-but-healthy run dead and let a
+ * second one start alongside it, duplicating records.
+ */
+const RUN_HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000;
+
+const STALE_RUN_ERROR =
+  'Run was interrupted (the server restarted). Re-running picks up the clients it never reached.';
+
+function parseRun(value: string): RolloverRun {
+  return { ...IDLE_RUN, ...JSON.parse(value) } as RolloverRun;
+}
+
+function heartbeatExpired(updatedAt: Date): boolean {
+  return Date.now() - updatedAt.getTime() > RUN_HEARTBEAT_TIMEOUT_MS;
+}
+
+export async function getRolloverRun(): Promise<RolloverRun> {
+  try {
+    const setting = await prisma.appSetting.findUnique({ where: { key: ROLLOVER_RUN_KEY } });
+    if (!setting) return { ...IDLE_RUN };
+
+    const run = parseRun(setting.value);
+
+    if (run.status === 'running' && heartbeatExpired(setting.updatedAt)) {
+      return { ...run, status: 'failed', error: STALE_RUN_ERROR };
+    }
+
+    return run;
+  } catch (err) {
+    logger.warn('Failed to read rollover run state', { error: String(err) });
+    return { ...IDLE_RUN };
+  }
+}
+
+/**
+ * Atomically take ownership of the rollover slot.
+ *
+ * A read-then-write guard isn't enough: planning a rollover takes seconds, so
+ * two admins can both see "not running" and then both create a project for
+ * every client. The compare-and-swap on `updatedAt` means exactly one caller
+ * wins, and the loser is told a run is already in flight.
+ */
+export async function claimRolloverRun(
+  targetYear: number,
+  total: number,
+  startedBy: string
+): Promise<RolloverRun | null> {
+  const claim: RolloverRun = {
+    ...IDLE_RUN,
+    status: 'running',
+    targetYear,
+    total,
+    startedAt: new Date().toISOString(),
+    startedBy
+  };
+  const value = JSON.stringify(claim);
+
+  const existing = await prisma.appSetting.findUnique({ where: { key: ROLLOVER_RUN_KEY } });
+
+  if (!existing) {
+    try {
+      await prisma.appSetting.create({ data: { key: ROLLOVER_RUN_KEY, value } });
+      return claim;
+    } catch {
+      // Another caller created the row first.
+      return null;
+    }
+  }
+
+  const current = parseRun(existing.value);
+  if (current.status === 'running' && !heartbeatExpired(existing.updatedAt)) {
+    return null;
+  }
+
+  const result = await prisma.appSetting.updateMany({
+    where: { key: ROLLOVER_RUN_KEY, updatedAt: existing.updatedAt },
+    data: { value }
+  });
+
+  return result.count === 1 ? claim : null;
+}
+
+export async function saveRolloverRun(run: RolloverRun): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { key: ROLLOVER_RUN_KEY },
+    create: { key: ROLLOVER_RUN_KEY, value: JSON.stringify(run) },
+    update: { value: JSON.stringify(run) }
+  });
 }

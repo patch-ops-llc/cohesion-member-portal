@@ -47,7 +47,7 @@ const notificationTypes = [
   {
     key: 'weeklyUpdate' as const,
     label: 'Weekly Updates',
-    description: 'Receive a weekly summary of your project status and progress'
+    description: 'Get a weekly email when documents still need your attention'
   }
 ];
 

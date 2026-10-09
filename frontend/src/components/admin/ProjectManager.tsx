@@ -15,12 +15,16 @@ interface AdminProject {
   name: string;
   email: string;
   pipelineStage: string;
+  taxYear: number | null;
   stats: {
     totalDocs: number;
     pendingDocs: number;
     acceptedDocs: number;
   };
 }
+
+const ALL_SEASONS = 'all';
+const NO_SEASON = 'none';
 
 interface ContactSearchResult {
   id: string;
@@ -60,8 +64,28 @@ function CreateProjectModal({ onClose, onCreated }: { onClose: () => void; onCre
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [selectedContact, setSelectedContact] = useState<ContactSearchResult | null>(null);
   const [projectName, setProjectName] = useState('');
+  const [taxYear, setTaxYear] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const queryClient = useQueryClient();
+
+  // The tax year decides whether the client can see the project at all, so
+  // prefill the configured season rather than leaving it to name parsing.
+  // Uses the settings-only endpoint: /admin/tax-season paginates every project
+  // in HubSpot, which is far too much work to prefill one field.
+  const { data: season } = useQuery({
+    queryKey: ['admin', 'tax-season', 'settings'],
+    queryFn: async () => {
+      const response = await api.get<{ settings: { currentTaxYear: number | null } }>(
+        '/admin/tax-season/settings'
+      );
+      return response.data.settings;
+    },
+    staleTime: 5 * 60 * 1000
+  });
+
+  useEffect(() => {
+    if (season?.currentTaxYear != null) setTaxYear(String(season.currentTaxYear));
+  }, [season?.currentTaxYear]);
 
   const handleQueryChange = useCallback((value: string) => {
     setContactQuery(value);
@@ -87,10 +111,12 @@ function CreateProjectModal({ onClose, onCreated }: { onClose: () => void; onCre
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!selectedContact) throw new Error('No contact selected');
+      const parsedYear = Number(taxYear.trim());
       const response = await api.post<{ success: boolean; project: { id: string } }>('/admin/projects', {
         contactId: selectedContact.id,
         contactEmail: selectedContact.email,
-        projectName: projectName.trim()
+        projectName: projectName.trim(),
+        taxYear: Number.isInteger(parsedYear) && parsedYear >= 2000 && parsedYear <= 2099 ? parsedYear : null
       });
       return response.data;
     },
@@ -187,16 +213,33 @@ function CreateProjectModal({ onClose, onCreated }: { onClose: () => void; onCre
 
           {/* Project Name */}
           {selectedContact && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Project Name</label>
-              <input
-                type="text"
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                placeholder="e.g. John Smith 2026 Tax Return"
-                className="input"
-              />
-            </div>
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Project Name</label>
+                <input
+                  type="text"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  placeholder="e.g. John Smith 2026 Tax Return"
+                  className="input"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Tax Year</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={taxYear}
+                  onChange={(e) => setTaxYear(e.target.value)}
+                  placeholder="e.g. 2026"
+                  className="input sm:w-40"
+                />
+                <p className="mt-1.5 text-xs text-gray-500">
+                  Determines whether the client sees this project while the season filter is on.
+                </p>
+              </div>
+            </>
           )}
 
           {/* Error */}
@@ -232,6 +275,7 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 export function ProjectManager() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [seasonFilter, setSeasonFilter] = useState<string>(ALL_SEASONS);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(10);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -309,14 +353,35 @@ export function ProjectManager() {
 
   const allProjects = data?.projects || [];
 
+  const availableSeasons = useMemo(() => {
+    const years = new Set<number>();
+    let hasUnknown = false;
+    for (const project of allProjects) {
+      if (project.taxYear === null || project.taxYear === undefined) hasUnknown = true;
+      else years.add(project.taxYear);
+    }
+    return { years: [...years].sort((a, b) => b - a), hasUnknown };
+  }, [allProjects]);
+
   const filteredProjects = useMemo(() => {
-    if (!debouncedSearch) return allProjects;
-    const q = debouncedSearch.toLowerCase();
-    return allProjects.filter(p =>
-      p.name?.toLowerCase().includes(q) ||
-      p.email?.toLowerCase().includes(q)
-    );
-  }, [allProjects, debouncedSearch]);
+    let result = allProjects;
+
+    if (seasonFilter === NO_SEASON) {
+      result = result.filter(p => p.taxYear === null || p.taxYear === undefined);
+    } else if (seasonFilter !== ALL_SEASONS) {
+      result = result.filter(p => p.taxYear === Number(seasonFilter));
+    }
+
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase();
+      result = result.filter(p =>
+        p.name?.toLowerCase().includes(q) ||
+        p.email?.toLowerCase().includes(q)
+      );
+    }
+
+    return result;
+  }, [allProjects, debouncedSearch, seasonFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredProjects.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
@@ -382,6 +447,19 @@ export function ProjectManager() {
             className="input pl-10"
           />
         </div>
+        {(availableSeasons.years.length > 1 || availableSeasons.hasUnknown) && (
+          <select
+            value={seasonFilter}
+            onChange={(e) => { setSeasonFilter(e.target.value); setCurrentPage(1); }}
+            className="input sm:w-44"
+          >
+            <option value={ALL_SEASONS}>All seasons</option>
+            {availableSeasons.years.map(year => (
+              <option key={year} value={year}>{year}</option>
+            ))}
+            {availableSeasons.hasUnknown && <option value={NO_SEASON}>No year</option>}
+          </select>
+        )}
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowCreateModal(true)}
@@ -509,9 +587,11 @@ export function ProjectManager() {
         <div className="text-center py-12">
           <FolderOpen className="h-12 w-12 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-500 mb-4">
-            {search ? 'No projects match your search' : 'No projects found'}
+            {search || seasonFilter !== ALL_SEASONS
+              ? 'No projects match your filters'
+              : 'No projects found'}
           </p>
-          {!search && (
+          {!search && seasonFilter === ALL_SEASONS && (
             <button
               onClick={() => setShowCreateModal(true)}
               className="btn-primary inline-flex items-center space-x-2"
@@ -545,6 +625,9 @@ export function ProjectManager() {
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Email
+                  </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Season
                   </th>
                   <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Documents
@@ -598,6 +681,15 @@ export function ProjectManager() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-gray-500">
                         {project.email}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        {project.taxYear !== null && project.taxYear !== undefined ? (
+                          <span className="text-gray-900">{project.taxYear}</span>
+                        ) : (
+                          <span className="text-gray-400" title="No tax year set and none in the project name">
+                            —
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         <span className="text-gray-900">{project.stats.totalDocs}</span>

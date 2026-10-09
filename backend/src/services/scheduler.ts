@@ -13,9 +13,15 @@ import {
   getAdminEmails,
   getWeeklyClientDigestEnabled,
   getWeeklyClientDigestSchedule,
-  getUploadDigestSchedule
+  getUploadDigestSchedule,
+  getTaxSeasonSettings
 } from './settings';
-import { documentsVisibleToClient, getNormalizedStage } from '../utils/documentData';
+import {
+  countClientActionNeeded,
+  documentsVisibleToClient,
+  getNormalizedStage,
+  isInDocumentCollectionPhase
+} from '../utils/documentData';
 import { retryPendingTransfers } from './fileIngest';
 
 const TIMEZONE = 'America/Chicago';
@@ -45,10 +51,14 @@ async function gatherUploadDigest(days: number): Promise<UploadDigestProject[]> 
 
     try {
       const project = await hubspot.getProject(projectId);
+      if (!isInDocumentCollectionPhase(project.properties.hs_pipeline_stage)) {
+        continue;
+      }
       projectName = project.properties.client_project_name || projectId;
       clientEmail = project.properties.email || '';
     } catch (err) {
       logger.warn('Could not fetch project for digest', { projectId, error: String(err) });
+      continue;
     }
 
     const categoryLabelCache = new Map<string, string>();
@@ -146,7 +156,6 @@ function summarizeProject(project: hubspot.Project): WeeklyProjectSummary {
   let totalDocs = 0;
   let pendingDocs = 0;
   let acceptedDocs = 0;
-  let actionNeeded = 0;
 
   for (const key of Object.keys(documentData)) {
     if (key === '_meta') continue;
@@ -156,9 +165,6 @@ function summarizeProject(project: hubspot.Project): WeeklyProjectSummary {
       totalDocs++;
       if (doc.status === 'pending_review') pendingDocs++;
       if (doc.status === 'accepted') acceptedDocs++;
-      if (doc.status === 'needs_resubmission' || doc.status === 'missing_files' || doc.status === 'not_submitted') {
-        actionNeeded++;
-      }
     }
   }
 
@@ -167,19 +173,26 @@ function summarizeProject(project: hubspot.Project): WeeklyProjectSummary {
     totalDocs,
     pendingDocs,
     acceptedDocs,
-    actionNeeded,
+    actionNeeded: countClientActionNeeded(documentData),
     stage: getNormalizedStage(project.properties.hs_pipeline_stage)
   };
 }
 
 // Group all projects by client email and build per-client digest payloads.
 async function gatherClientDigests(): Promise<ClientDigest[]> {
-  const { projects } = await hubspot.getAllProjects();
+  const [{ projects }, season] = await Promise.all([
+    hubspot.getAllProjects(),
+    getTaxSeasonSettings()
+  ]);
 
   const byEmail = new Map<string, { projects: hubspot.Project[]; cc: Set<string> }>();
 
   for (const project of projects) {
     if (hubspot.projectIsAdvisory(project)) continue;
+    if (!isInDocumentCollectionPhase(project.properties.hs_pipeline_stage)) continue;
+    // Match the portal exactly. Chasing a client about documents on a project
+    // they can no longer open is worse than sending nothing.
+    if (!hubspot.projectVisibleInSeason(project, season)) continue;
 
     const email = project.properties.email?.toLowerCase().trim();
     if (!email) continue;
@@ -217,14 +230,21 @@ interface WeeklyDigestRunOptions {
   skipGlobalCheck?: boolean;
 }
 
-export async function runWeeklyClientDigest(opts: WeeklyDigestRunOptions = {}): Promise<{ sent: number; skipped: boolean }> {
+export interface WeeklyDigestRunResult {
+  sent: number;
+  skipped: boolean;
+  // Clients who matched the send but had nothing in the email's Action column.
+  skippedNoAction: number;
+}
+
+export async function runWeeklyClientDigest(opts: WeeklyDigestRunOptions = {}): Promise<WeeklyDigestRunResult> {
   logger.info('Running weekly client digest...', { filtered: Boolean(opts.filterEmails?.length), manual: Boolean(opts.skipGlobalCheck) });
 
   if (!opts.skipGlobalCheck) {
     const enabled = await getWeeklyClientDigestEnabled();
     if (!enabled) {
       logger.info('Weekly client digest is disabled, skipping');
-      return { sent: 0, skipped: true };
+      return { sent: 0, skipped: true, skippedNoAction: 0 };
     }
   }
 
@@ -237,11 +257,30 @@ export async function runWeeklyClientDigest(opts: WeeklyDigestRunOptions = {}): 
 
   if (digests.length === 0) {
     logger.info('Weekly client digest: no matching client projects found, skipping');
-    return { sent: 0, skipped: true };
+    return { sent: 0, skipped: true, skippedNoAction: 0 };
+  }
+
+  // Only email a client when at least one project has something in the Action
+  // column. A filed or waiting-on-the-firm return (Action = 0) stays quiet.
+  // Drop those projects from the email too, so a client with one open return
+  // and one finished return only sees the open one.
+  const actionable = digests
+    .map(digest => ({
+      ...digest,
+      projects: digest.projects.filter(project => project.actionNeeded > 0)
+    }))
+    .filter(digest => digest.projects.length > 0);
+  const skippedNoAction = digests.length - actionable.length;
+
+  if (actionable.length === 0) {
+    logger.info('Weekly client digest: every matching client has an empty Action column, skipping', {
+      skippedNoAction
+    });
+    return { sent: 0, skipped: true, skippedNoAction };
   }
 
   let sent = 0;
-  for (const digest of digests) {
+  for (const digest of actionable) {
     try {
       // Best-effort display name lookup; falls back to "there" inside the email.
       let displayName = '';
@@ -253,15 +292,19 @@ export async function runWeeklyClientDigest(opts: WeeklyDigestRunOptions = {}): 
       }
 
       // sendWeeklyUpdateEmail respects the per-user weeklyUpdate preference.
-      await sendWeeklyUpdateEmail(digest.email, displayName, digest.projects, digest.cc);
-      sent++;
+      const didSend = await sendWeeklyUpdateEmail(digest.email, displayName, digest.projects, digest.cc);
+      if (didSend) sent++;
     } catch (err) {
       logger.error('Failed to send weekly client digest', { email: digest.email, error: String(err) });
     }
   }
 
-  logger.info('Weekly client digest sent', { recipients: sent, totalClients: digests.length });
-  return { sent, skipped: false };
+  logger.info('Weekly client digest sent', {
+    recipients: sent,
+    totalClients: digests.length,
+    skippedNoAction
+  });
+  return { sent, skipped: false, skippedNoAction };
 }
 
 // ─── Weekly admin summary ───────────────────────────────────────────────

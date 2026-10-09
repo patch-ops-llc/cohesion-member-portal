@@ -28,8 +28,18 @@ import {
   getPortalBanner,
   setPortalBanner,
   BANNER_PAGE_OPTIONS,
-  ALLOWED_TIMEZONES
+  ALLOWED_TIMEZONES,
+  getTaxSeasonSettings,
+  setTaxSeasonSettings,
+  getRolloverRun
 } from '../services/settings';
+import {
+  planRollover,
+  startRollover,
+  getSeasonOverview,
+  backfillTaxYears
+} from '../services/rollover';
+import { MAX_TAX_YEAR, MIN_TAX_YEAR } from '../utils/taxYear';
 import { adminMiddleware } from '../middleware/admin';
 import { AppError } from '../middleware/errorHandler';
 import {
@@ -40,6 +50,7 @@ import {
   maxFilesPerUpload
 } from '../utils/validation';
 import { logger } from '../utils/logger';
+import { countClientActionNeeded, isInDocumentCollectionPhase } from '../utils/documentData';
 import prisma from '../db/client';
 
 const PASSWORD_RESET_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
@@ -91,6 +102,7 @@ router.get('/projects', async (req, res, next) => {
         name: project.properties.client_project_name,
         email: project.properties.email,
         pipelineStage: project.properties.hs_pipeline_stage,
+        taxYear: hubspot.getProjectTaxYear(project),
         stats: { totalDocs, pendingDocs, acceptedDocs }
       };
     });
@@ -137,6 +149,7 @@ router.get('/projects/:id', async (req, res, next) => {
         name: project.properties.client_project_name,
         email: project.properties.email,
         pipelineStage: project.properties.hs_pipeline_stage,
+        taxYear: hubspot.getProjectTaxYear(project),
         fileDirectory: project.properties.file_directory
       },
       documentData,
@@ -368,14 +381,22 @@ router.post('/projects', async (req, res, next) => {
     const schema = z.object({
       contactId: z.string().min(1),
       contactEmail: z.string().email(),
-      projectName: z.string().min(1, 'Project name is required').max(200)
+      projectName: z.string().min(1, 'Project name is required').max(200),
+      taxYear: z.number().int().min(MIN_TAX_YEAR).max(MAX_TAX_YEAR).nullable().optional()
     });
 
-    const { contactId, contactEmail, projectName } = schema.parse(req.body);
+    const { contactId, contactEmail, projectName, taxYear } = schema.parse(req.body);
+
+    // Default to the configured season. Without this, a name like "John Smith
+    // 2025 Tax Return" would be read as last season and hidden from the client
+    // the moment it was created.
+    const season = await getTaxSeasonSettings();
+    const effectiveTaxYear = taxYear ?? season.currentTaxYear;
 
     const project = await hubspot.createProject({
       client_project_name: projectName,
-      email: contactEmail
+      email: contactEmail,
+      tax_year: effectiveTaxYear
     });
 
     await hubspot.associateProjectWithContact(project.id, contactId);
@@ -387,20 +408,26 @@ router.post('/projects', async (req, res, next) => {
         entityId: project.id,
         userEmail: 'admin',
         userType: 'admin',
-        details: { contactId, contactEmail, projectName },
+        details: { contactId, contactEmail, projectName, taxYear: effectiveTaxYear },
         ipAddress: req.ip,
         userAgent: req.get('user-agent')
       }
     });
 
-    logger.info('Admin created project', { projectId: project.id, contactEmail, projectName });
+    logger.info('Admin created project', {
+      projectId: project.id,
+      contactEmail,
+      projectName,
+      taxYear: effectiveTaxYear
+    });
 
     res.status(201).json({
       success: true,
       project: {
         id: project.id,
         name: projectName,
-        email: contactEmail
+        email: contactEmail,
+        taxYear: effectiveTaxYear
       }
     });
   } catch (error) {
@@ -1006,12 +1033,24 @@ router.post('/weekly-digest/send', async (req, res, next) => {
 
     logger.info('Admin triggered weekly client digest', { ...clientResult, isSubset });
 
+    const skipNote = clientResult.skippedNoAction > 0
+      ? ` ${clientResult.skippedNoAction} client(s) were skipped because nothing is in the Action column.`
+      : '';
+    let message: string;
+    if (clientResult.sent > 0) {
+      message = `Weekly digest sent to ${clientResult.sent} client(s).${skipNote}`;
+    } else if (clientResult.skippedNoAction > 0 && clientResult.skipped) {
+      message = `No emails sent.${skipNote}`;
+    } else if (clientResult.skipped) {
+      message = 'No matching clients to send (no projects are still collecting documents).';
+    } else {
+      message = `No emails sent. Matching clients have the weekly digest turned off.${skipNote}`;
+    }
+
     res.json({
       success: true,
       ...clientResult,
-      message: clientResult.skipped
-        ? 'No matching clients to send (everyone selected may have opted out)'
-        : `Weekly digest sent to ${clientResult.sent} client(s)`
+      message
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -1028,15 +1067,31 @@ router.get('/weekly-digest/clients', async (_req, res, next) => {
     const { projects } = await hubspot.getAllProjects();
 
     // Group projects by client email, tracking a representative project name + count.
-    const byEmail = new Map<string, { projectCount: number; sampleName: string }>();
+    // Only clients with at least one project still collecting documents are eligible.
+    const byEmail = new Map<string, { projectCount: number; sampleName: string; actionNeeded: number }>();
+    const season = await getTaxSeasonSettings();
     for (const p of projects) {
+      if (hubspot.projectIsAdvisory(p)) continue;
+      if (!isInDocumentCollectionPhase(p.properties.hs_pipeline_stage)) continue;
+      // Same eligibility the digest uses. actionNeeded is the extra gate:
+      // a client with 0 will not be emailed until a document needs their action.
+      if (!hubspot.projectVisibleInSeason(p, season)) continue;
+
       const email = p.properties.email?.toLowerCase().trim();
       if (!email) continue;
+      const actionNeeded = countClientActionNeeded(
+        hubspot.parseDocumentData(p.properties.document_data)
+      );
       const existing = byEmail.get(email);
       if (existing) {
         existing.projectCount++;
+        existing.actionNeeded += actionNeeded;
       } else {
-        byEmail.set(email, { projectCount: 1, sampleName: p.properties.client_project_name || '' });
+        byEmail.set(email, {
+          projectCount: 1,
+          sampleName: p.properties.client_project_name || '',
+          actionNeeded
+        });
       }
     }
 
@@ -1074,6 +1129,7 @@ router.get('/weekly-digest/clients', async (_req, res, next) => {
           email,
           displayName: contactName || info.sampleName || null,
           projectCount: info.projectCount,
+          actionNeeded: info.actionNeeded,
           weeklyUpdate: prefMap.has(email) ? prefMap.get(email)! : true,
           registered: contactIdByEmail.has(email) || registeredUsers.some(u => u.email === email)
         };
@@ -1299,6 +1355,136 @@ router.put('/settings/banner', async (req, res, next) => {
     res.json({ success: true, banner });
   } catch (error) {
     if (error instanceof z.ZodError) return next(new AppError('Invalid banner settings', 400));
+    next(error);
+  }
+});
+
+// ─── Tax season ────────────────────────────────────────────────────────
+
+const taxYearSchema = z.number().int().min(MIN_TAX_YEAR).max(MAX_TAX_YEAR);
+
+// GET /api/admin/tax-season/settings - just the stored setting.
+// Separate from /tax-season because the overview there paginates every project
+// in HubSpot; callers that only need the year shouldn't pay for that.
+router.get('/tax-season/settings', async (_req, res, next) => {
+  try {
+    res.json({ success: true, settings: await getTaxSeasonSettings() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/admin/tax-season - current season config plus what's actually in HubSpot
+router.get('/tax-season', async (_req, res, next) => {
+  try {
+    const [settings, overview, run] = await Promise.all([
+      getTaxSeasonSettings(),
+      getSeasonOverview(),
+      getRolloverRun()
+    ]);
+    res.json({ success: true, settings, overview, run });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/admin/tax-season - set the current season / portal filter
+router.put('/tax-season', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      // null clears the season, which turns the portal filter off entirely.
+      currentTaxYear: taxYearSchema.nullable().optional(),
+      hidePriorYearProjects: z.boolean().optional()
+    });
+
+    const input = schema.parse(req.body);
+    const settings = await setTaxSeasonSettings(input);
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'update_tax_season',
+        entityType: 'settings',
+        entityId: 'taxSeason',
+        userType: 'admin',
+        details: { ...settings },
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      }
+    });
+
+    logger.info('Admin updated tax season settings', { ...settings });
+    res.json({ success: true, settings });
+  } catch (error) {
+    if (error instanceof z.ZodError) return next(new AppError('Invalid tax season settings', 400));
+    next(error);
+  }
+});
+
+// POST /api/admin/tax-season/rollover/preview - dry run, writes nothing
+router.post('/tax-season/rollover/preview', async (req, res, next) => {
+  try {
+    const { targetYear } = z.object({ targetYear: taxYearSchema }).parse(req.body);
+    const plan = await planRollover(targetYear);
+    res.json({ success: true, plan });
+  } catch (error) {
+    if (error instanceof z.ZodError) return next(new AppError('A valid target year is required', 400));
+    next(error);
+  }
+});
+
+// POST /api/admin/tax-season/rollover - start the rollover (runs in background)
+router.post('/tax-season/rollover', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      targetYear: taxYearSchema,
+      // Echoed back by the UI's confirmation field so a stray click can't
+      // create a few hundred CRM records.
+      confirmYear: taxYearSchema
+    });
+
+    const { targetYear, confirmYear } = schema.parse(req.body);
+    if (targetYear !== confirmYear) {
+      throw new AppError('Confirmation year does not match the target year', 400);
+    }
+
+    const plan = await planRollover(targetYear);
+    if (plan.items.length === 0) {
+      throw new AppError(`Nothing to roll over — every client already has a ${targetYear} project`, 400);
+    }
+
+    // Claiming the slot is atomic, so two admins planning at the same time
+    // can't both proceed to create a project for every client. The run itself
+    // is detached and reports progress via GET /tax-season/rollover/status.
+    const claimed = await startRollover(plan, 'admin');
+    if (!claimed) {
+      throw new AppError('A rollover is already running', 409);
+    }
+
+    logger.info('Admin started tax season rollover', { targetYear, toCreate: plan.items.length });
+    res.status(202).json({ success: true, targetYear, total: plan.items.length });
+  } catch (error) {
+    if (error instanceof z.ZodError) return next(new AppError('A valid target year is required', 400));
+    next(error);
+  }
+});
+
+// GET /api/admin/tax-season/rollover/status - progress for a running/finished run
+router.get('/tax-season/rollover/status', async (_req, res, next) => {
+  try {
+    res.json({ success: true, run: await getRolloverRun() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/admin/tax-season/backfill - stamp tax_year from project names
+router.post('/tax-season/backfill', async (req, res, next) => {
+  try {
+    const { dryRun } = z.object({ dryRun: z.boolean().default(true) }).parse(req.body ?? {});
+    const result = await backfillTaxYears(dryRun);
+    res.json({ success: true, result });
+  } catch (error) {
+    if (error instanceof z.ZodError) return next(new AppError('Invalid backfill request', 400));
     next(error);
   }
 });

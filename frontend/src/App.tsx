@@ -32,6 +32,7 @@ import { RegisteredUsers } from './components/admin/RegisteredUsers';
 import { AdminNotificationSettings } from './components/admin/NotificationSettings';
 import { EmailTemplateSettings } from './components/admin/EmailTemplateSettings';
 import { BannerSettings } from './components/admin/BannerSettings';
+import { TaxSeasonSettings } from './components/admin/TaxSeasonSettings';
 
 // Auth provider
 import { AuthProvider } from './hooks/useAuth';
@@ -163,6 +164,14 @@ function App() {
                 element={
                   <AdminRoute>
                     <BannerSettings />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/tax-season"
+                element={
+                  <AdminRoute>
+                    <TaxSeasonSettings />
                   </AdminRoute>
                 }
               />

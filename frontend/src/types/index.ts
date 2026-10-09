@@ -41,6 +41,9 @@ export interface Project {
   stage: PipelineStage;
   documentData?: DocumentData;
   fileDirectory?: string;
+  // Filing season. Null when neither the tax_year property nor the project
+  // name says which season the project belongs to.
+  taxYear?: number | null;
 }
 
 // File upload record
@@ -209,6 +212,7 @@ export interface WeeklyDigestClient {
   email: string;
   displayName: string | null;
   projectCount: number;
+  actionNeeded: number;
   weeklyUpdate: boolean;
   registered: boolean;
 }
@@ -241,6 +245,87 @@ export interface EmailTemplate {
   variables: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+// ─── Tax season ────────────────────────────────────────────────────────
+
+// Which season the portal treats as current. A null year means unconfigured,
+// and the client-facing filter stays off.
+export interface TaxSeasonSettings {
+  currentTaxYear: number | null;
+  hidePriorYearProjects: boolean;
+}
+
+// Project counts per season, straight from HubSpot
+export interface SeasonOverview {
+  totalProjects: number;
+  taxProjects: number;
+  years: Array<{ year: number | null; count: number; fromNameOnly: number }>;
+  missingTaxYear: number;
+  backfillable: number;
+}
+
+// One project the rollover would create
+export interface RolloverPlanItem {
+  email: string;
+  sourceProjectId: string;
+  sourceName: string;
+  sourceYear: number | null;
+  newName: string;
+  activeCategories: number;
+  documents: number;
+}
+
+export interface RolloverSkip {
+  email: string;
+  projectName: string;
+  reason: 'already_current' | 'no_tax_projects';
+  detail: string;
+}
+
+// Dry-run result: exactly what a rollover would do
+export interface RolloverPlan {
+  targetYear: number;
+  scannedProjects: number;
+  clients: number;
+  items: RolloverPlanItem[];
+  skipped: RolloverSkip[];
+}
+
+export type RolloverStatus = 'idle' | 'running' | 'completed' | 'failed';
+
+export interface RolloverRunItem {
+  email: string;
+  sourceProjectId: string;
+  sourceName: string;
+  newProjectId?: string;
+  newName: string;
+  outcome: 'created' | 'failed';
+  error?: string;
+}
+
+// Progress of a rollover, polled while it runs
+export interface RolloverRun {
+  status: RolloverStatus;
+  targetYear: number | null;
+  total: number;
+  created: number;
+  failed: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  startedBy: string | null;
+  error: string | null;
+  items: RolloverRunItem[];
+}
+
+export interface BackfillResult {
+  dryRun: boolean;
+  scanned: number;
+  updated: number;
+  failed: number;
+  unresolved: number;
+  changes: Array<{ projectId: string; name: string; year: number }>;
+  errors: Array<{ projectId: string; error: string }>;
 }
 
 // Pizza tracker stages

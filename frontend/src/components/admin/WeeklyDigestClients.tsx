@@ -245,6 +245,7 @@ export function WeeklyDigestClients() {
                 </th>
                 <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
                 <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Projects</th>
+                <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
                 <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Weekly Digest</th>
               </tr>
             </thead>
@@ -276,6 +277,13 @@ export function WeeklyDigestClients() {
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-center text-sm text-gray-500">{client.projectCount}</td>
+                  <td className="px-3 py-2.5 text-center text-sm">
+                    {(client.actionNeeded ?? 0) > 0 ? (
+                      <span className="font-semibold text-orange-800">{client.actionNeeded}</span>
+                    ) : (
+                      <span className="text-gray-400" title="This client will not receive the weekly email until a document needs their action">0</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5">
                     <div className="flex justify-end">
                       <Toggle
@@ -293,8 +301,8 @@ export function WeeklyDigestClients() {
       )}
 
       <p className="text-xs text-gray-400">
-        Showing {filtered.length} of {clients.length} client(s). A client toggled off won't receive the weekly
-        digest, even on a manual send.
+        Showing {filtered.length} of {clients.length} client(s) with projects still collecting documents.
+        The weekly email only goes out when Action is greater than 0. A client toggled off won't receive it, even on a manual send.
       </p>
     </div>
   );

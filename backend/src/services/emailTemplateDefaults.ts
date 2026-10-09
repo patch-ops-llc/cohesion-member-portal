@@ -146,7 +146,7 @@ export const DEFAULT_TEMPLATES: TemplateDefault[] = [
     senderEmail: FROM_EMAIL,
     subject: 'Your Weekly Cohesion Portal Update',
     body: `<p>Hi {{displayName}},</p>
-<p>Here's your weekly update on your Cohesion Document Portal projects:</p>
+<p>You have documents that still need your attention:</p>
 {{projectRows}}
 <p style="text-align: center;">
   <a href="{{portalUrl}}" class="btn">View Your Projects</a>

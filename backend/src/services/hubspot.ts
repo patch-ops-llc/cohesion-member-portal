@@ -4,6 +4,8 @@ import FormData from 'form-data';
 import fs from 'fs';
 import { logger } from '../utils/logger';
 import { getAdvisoryHideReason } from '../utils/documentData';
+import { isVisibleForSeason, resolveTaxYear } from '../utils/taxYear';
+import { getTaxSeasonSettings, type TaxSeasonSettings } from './settings';
 
 const hubspotClient = new Client({ 
   accessToken: process.env.HUBSPOT_ACCESS_TOKEN 
@@ -14,6 +16,121 @@ const HUBSPOT_PORTAL_ID = process.env.HUBSPOT_PORTAL_ID || '242796132';
 /** HubSpot date property on p_client_projects (label: Documents Accepted Date) */
 const DOCUMENTS_ACCEPTED_DATE_PROP =
   process.env.HUBSPOT_DOCUMENTS_ACCEPTED_DATE_PROPERTY || 'documents_accepted_date';
+/** HubSpot number property on p_client_projects (label: Tax Year) */
+export const TAX_YEAR_PROP = process.env.HUBSPOT_TAX_YEAR_PROPERTY || 'tax_year';
+
+const BASE_PROJECT_PROPERTIES = [
+  'client_project_name',
+  'email',
+  'hs_pipeline',
+  'hs_pipeline_stage',
+  'document_data',
+  'file_directory',
+  'cc_email',
+  'hs_createdate'
+];
+
+// HubSpot rejects reads and writes that name a property the portal doesn't
+// have, so `tax_year` is only ever included once we've confirmed it exists.
+// Probed once per process; ensureTaxYearProperty() creates it at boot.
+let taxYearProbe: Promise<boolean> | null = null;
+
+async function taxYearPropertyExists(): Promise<boolean> {
+  if (!taxYearProbe) {
+    const probe = axios
+      .get(`https://api.hubapi.com/crm/v3/properties/${CUSTOM_OBJECT_TYPE}/${TAX_YEAR_PROP}`, {
+        headers: { Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}` }
+      })
+      .then(() => true)
+      .catch((error) => {
+        if (axios.isAxiosError(error) && error.response?.status === 404) return false;
+
+        // Only a definitive answer gets cached. A throttled or flaky probe
+        // must not pin the property to "absent" for the life of the process —
+        // that would silently drop tax years from every later write.
+        taxYearProbe = null;
+        logger.warn('Could not probe tax_year property; treating as absent for this call', {
+          error: String(error)
+        });
+        return false;
+      });
+
+    taxYearProbe = probe;
+    return probe;
+  }
+  return taxYearProbe;
+}
+
+/**
+ * Property group to file Tax Year under. Custom-object group names vary by
+ * portal (`p_client_projects_information` and similar), so read them rather
+ * than guessing a name HubSpot would reject.
+ */
+async function resolveProjectPropertyGroup(): Promise<string> {
+  const response = await axios.get<{ results?: Array<{ name: string }> }>(
+    `https://api.hubapi.com/crm/v3/properties/${CUSTOM_OBJECT_TYPE}/groups`,
+    { headers: { Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}` } }
+  );
+
+  const groups = response.data?.results || [];
+  const preferred = groups.find(g => g.name.endsWith('_information')) || groups[0];
+  if (!preferred) {
+    throw new Error('No property groups found on p_client_projects');
+  }
+  return preferred.name;
+}
+
+/**
+ * Create the Tax Year property if the portal lacks it. Idempotent and additive,
+ * so it's safe to run on every boot as well as from the provisioning script.
+ */
+export async function ensureTaxYearProperty(): Promise<{ existed: boolean }> {
+  if (await taxYearPropertyExists()) return { existed: true };
+
+  const groupName = await resolveProjectPropertyGroup();
+
+  try {
+    await axios.post(
+      `https://api.hubapi.com/crm/v3/properties/${CUSTOM_OBJECT_TYPE}`,
+      {
+        name: TAX_YEAR_PROP,
+        label: 'Tax Year',
+        type: 'number',
+        fieldType: 'number',
+        groupName,
+        description:
+          'Filing season this project belongs to. Set by the portal when a season is rolled over.'
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+  } catch (error) {
+    // 409 means the property is already there and the probe was simply wrong
+    // (a flaky first probe). That's still a success, and the cache must be
+    // corrected or every later write would drop the tax year.
+    if (axios.isAxiosError(error) && error.response?.status === 409) {
+      taxYearProbe = Promise.resolve(true);
+      return { existed: true };
+    }
+    taxYearProbe = null;
+    throw error;
+  }
+
+  taxYearProbe = Promise.resolve(true);
+  logger.info('Created tax_year property on p_client_projects', { property: TAX_YEAR_PROP, groupName });
+  return { existed: false };
+}
+
+/** Property list for project reads, including tax_year only when it exists. */
+async function projectProperties(): Promise<string[]> {
+  return (await taxYearPropertyExists())
+    ? [...BASE_PROJECT_PROPERTIES, TAX_YEAR_PROP]
+    : [...BASE_PROJECT_PROPERTIES];
+}
 
 // Build the canonical HubSpot File Manager URL for a folder.
 // HubSpot expects: https://app-na2.hubspot.com/files/<portalId>/?folderId=<folderId>
@@ -48,6 +165,9 @@ export interface ProjectProperties {
   document_data: string;
   file_directory?: string;
   cc_email?: string;
+  hs_createdate?: string;
+  /** Number property, but HubSpot returns every value as a string. */
+  tax_year?: string;
 }
 
 export interface Project {
@@ -79,7 +199,7 @@ export async function getProject(projectId: string): Promise<Project> {
     const response = await hubspotClient.crm.objects.basicApi.getById(
       CUSTOM_OBJECT_TYPE,
       projectId,
-      ['client_project_name', 'email', 'hs_pipeline', 'hs_pipeline_stage', 'document_data', 'file_directory', 'cc_email']
+      await projectProperties()
     );
     return {
       id: response.id,
@@ -95,6 +215,7 @@ export async function getProject(projectId: string): Promise<Project> {
 export async function getProjectsByEmail(email: string): Promise<Project[]> {
   const allProjects: Project[] = [];
   let after: string | undefined;
+  const properties = await projectProperties();
 
   try {
     do {
@@ -102,7 +223,7 @@ export async function getProjectsByEmail(email: string): Promise<Project[]> {
         CUSTOM_OBJECT_TYPE,
         100,
         after,
-        ['client_project_name', 'email', 'hs_pipeline', 'hs_pipeline_stage', 'document_data', 'cc_email']
+        properties
       );
 
       const matching = response.results.filter(
@@ -129,6 +250,7 @@ export async function getProjectsByEmail(email: string): Promise<Project[]> {
 export async function getAllProjects(): Promise<{ projects: Project[] }> {
   const allProjects: Project[] = [];
   let after: string | undefined;
+  const properties = await projectProperties();
 
   try {
     do {
@@ -136,7 +258,7 @@ export async function getAllProjects(): Promise<{ projects: Project[] }> {
         CUSTOM_OBJECT_TYPE,
         100,
         after,
-        ['client_project_name', 'email', 'hs_pipeline', 'hs_pipeline_stage', 'document_data', 'cc_email']
+        properties
       );
 
       allProjects.push(...response.results.map(p => ({
@@ -724,25 +846,52 @@ export async function searchContacts(query: string, limit: number = 10): Promise
 export async function createProject(properties: {
   client_project_name: string;
   email: string;
+  tax_year?: number | null;
+  cc_email?: string | null;
+  documentData?: DocumentData;
+  pipeline?: string | null;
+  pipelineStage?: string | null;
 }): Promise<Project> {
   try {
-    const defaultDocumentData: DocumentData = {
+    const documentData: DocumentData = properties.documentData || {
       _meta: { selectedSections: ['personal'] }
     };
+
+    const payload: Record<string, string> = {
+      client_project_name: properties.client_project_name,
+      email: properties.email.toLowerCase().trim(),
+      document_data: JSON.stringify(documentData)
+    };
+
+    if (properties.cc_email) payload.cc_email = properties.cc_email;
+    if (properties.pipeline) payload.hs_pipeline = properties.pipeline;
+    if (properties.pipelineStage) payload.hs_pipeline_stage = properties.pipelineStage;
+
+    if (properties.tax_year) {
+      // Refuse rather than silently drop it: the tax year decides whether the
+      // client can see this project, and a caller told to expect it stored
+      // would otherwise report success on a project nobody can find.
+      if (!(await taxYearPropertyExists())) {
+        throw new Error(
+          `Cannot set tax year: HubSpot property "${TAX_YEAR_PROP}" is unavailable on p_client_projects`
+        );
+      }
+      payload[TAX_YEAR_PROP] = String(properties.tax_year);
+    }
 
     const response = await hubspotClient.crm.objects.basicApi.create(
       CUSTOM_OBJECT_TYPE,
       {
-        properties: {
-          client_project_name: properties.client_project_name,
-          email: properties.email.toLowerCase().trim(),
-          document_data: JSON.stringify(defaultDocumentData)
-        },
+        properties: payload,
         associations: []
       }
     );
 
-    logger.info('Created project in HubSpot', { projectId: response.id, name: properties.client_project_name });
+    logger.info('Created project in HubSpot', {
+      projectId: response.id,
+      name: properties.client_project_name,
+      taxYear: properties.tax_year ?? null
+    });
 
     return {
       id: response.id,
@@ -773,8 +922,6 @@ export async function associateProjectWithContact(projectId: string, contactId: 
   }
 }
 
-const PROJECT_PROPERTIES = ['client_project_name', 'email', 'hs_pipeline', 'hs_pipeline_stage', 'document_data', 'cc_email'];
-
 // Get projects associated with a contact via CRM associations
 export async function getProjectsByContactAssociation(contactId: string): Promise<Project[]> {
   try {
@@ -799,7 +946,7 @@ export async function getProjectsByContactAssociation(contactId: string): Promis
     }>(
       `https://api.hubapi.com/crm/v3/objects/${CUSTOM_OBJECT_TYPE}/batch/read`,
       {
-        properties: PROJECT_PROPERTIES,
+        properties: await projectProperties(),
         inputs: projectIds.map(id => ({ id }))
       },
       {
@@ -836,11 +983,64 @@ export function projectIsAdvisory(project: Project): boolean {
   return getAdvisoryHideReason(projectAdvisorySignals(project)) !== null;
 }
 
+/** Raw tax_year value as HubSpot returned it, honouring the configured name. */
+function rawTaxYear(project: Project): string | undefined {
+  return (project.properties as unknown as Record<string, string | undefined>)[TAX_YEAR_PROP];
+}
+
+/** True when the project carries an explicit tax_year, not just a year in its name. */
+export function hasExplicitTaxYear(project: Project): boolean {
+  const raw = rawTaxYear(project);
+  return raw !== undefined && raw !== null && raw !== '';
+}
+
+/**
+ * Season a project belongs to: the tax_year property when set, otherwise the
+ * year read out of its name. Null when neither is available.
+ */
+export function getProjectTaxYear(project: Project): number | null {
+  return resolveTaxYear({
+    taxYear: rawTaxYear(project),
+    name: project.properties.client_project_name
+  });
+}
+
+/** Stamp tax_year on an existing project (used by the backfill). */
+export async function updateProjectTaxYear(projectId: string, taxYear: number): Promise<void> {
+  if (!(await taxYearPropertyExists())) {
+    throw new Error(`HubSpot property "${TAX_YEAR_PROP}" does not exist on p_client_projects`);
+  }
+
+  await hubspotClient.crm.objects.basicApi.update(CUSTOM_OBJECT_TYPE, projectId, {
+    properties: { [TAX_YEAR_PROP]: String(taxYear) }
+  });
+
+  logger.info('Set project tax year', { projectId, taxYear });
+}
+
+/**
+ * True when the given season settings allow a client to see this project.
+ * Takes the settings so callers looping over many projects read them once.
+ */
+export function projectVisibleInSeason(project: Project, season: TaxSeasonSettings): boolean {
+  return isVisibleForSeason(
+    getProjectTaxYear(project),
+    season.currentTaxYear,
+    season.hidePriorYearProjects
+  );
+}
+
+/** Single-project convenience wrapper that loads the season itself. */
+export async function projectIsInCurrentSeason(project: Project): Promise<boolean> {
+  return projectVisibleInSeason(project, await getTaxSeasonSettings());
+}
+
 // Combine email-matched and association-matched projects (deduplicated)
 export async function getProjectsForUser(email: string, contactId: string | null): Promise<Project[]> {
-  const [emailProjects, assocProjects] = await Promise.all([
+  const [emailProjects, assocProjects, season] = await Promise.all([
     getProjectsByEmail(email),
-    contactId ? getProjectsByContactAssociation(contactId) : Promise.resolve([])
+    contactId ? getProjectsByContactAssociation(contactId) : Promise.resolve([]),
+    getTaxSeasonSettings()
   ]);
 
   const projectMap = new Map<string, Project>();
@@ -851,6 +1051,7 @@ export async function getProjectsForUser(email: string, contactId: string | null
 
   const visible: Project[] = [];
   let hiddenAdvisory = 0;
+  let hiddenPriorSeason = 0;
   for (const project of projectMap.values()) {
     const reason = getAdvisoryHideReason(projectAdvisorySignals(project));
     if (reason) {
@@ -865,6 +1066,19 @@ export async function getProjectsForUser(email: string, contactId: string | null
       });
       continue;
     }
+
+    if (!projectVisibleInSeason(project, season)) {
+      hiddenPriorSeason += 1;
+      logger.info('Hiding prior-season project from client portal', {
+        email,
+        projectId: project.id,
+        name: project.properties.client_project_name,
+        projectYear: getProjectTaxYear(project),
+        currentTaxYear: season.currentTaxYear
+      });
+      continue;
+    }
+
     visible.push(project);
   }
 
@@ -875,6 +1089,7 @@ export async function getProjectsForUser(email: string, contactId: string | null
     assocCount: assocProjects.length,
     totalUnique: projectMap.size,
     hiddenAdvisory,
+    hiddenPriorSeason,
     clientVisible: visible.length
   });
 
@@ -891,6 +1106,17 @@ export async function userHasProjectAccess(
 
   if (projectIsAdvisory(project)) {
     logger.info('Denied client access to advisory project', { projectId, email });
+    return false;
+  }
+
+  // Prior-season projects are hidden from the list, so honour that here too —
+  // otherwise an old bookmark still reaches a project the portal won't show.
+  if (!(await projectIsInCurrentSeason(project))) {
+    logger.info('Denied client access to prior-season project', {
+      projectId,
+      email,
+      projectYear: getProjectTaxYear(project)
+    });
     return false;
   }
 

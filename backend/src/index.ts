@@ -16,6 +16,7 @@ import emailTemplateRoutes from './routes/emailTemplates';
 import { errorHandler } from './middleware/errorHandler';
 import { logger } from './utils/logger';
 import { startScheduler } from './services/scheduler';
+import { ensureTaxYearProperty } from './services/hubspot';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -114,6 +115,14 @@ app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   startScheduler().catch(err => logger.error('Failed to start scheduler', { error: String(err) }));
+
+  // Additive and idempotent. Failure is non-fatal: without the property the
+  // portal falls back to reading the year out of project names.
+  ensureTaxYearProperty()
+    .then(({ existed }) => {
+      if (!existed) logger.info('Provisioned tax_year property on p_client_projects');
+    })
+    .catch(err => logger.warn('Could not provision tax_year property', { error: String(err) }));
 });
 
 export default app;
